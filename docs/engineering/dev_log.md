@@ -104,3 +104,54 @@ Forbidden long-lived development branches: `hot-dev`, `agent-dev`,
 - Push CI/CODEOWNERS to `dev`.
 - Clear `main` content so only an empty `README.md` remains.
 - Configure and read back branch protection for `main`, `demo`, and `dev`.
+
+### Completed Configuration
+
+- Confirmed repository: `atlax-tech/agent-dock`.
+- Confirmed admin permission for `QilongLu`.
+- Confirmed remote branches exist: `main`, `demo`, and `dev`.
+- Cleared `main` so it contains only an empty `README.md`.
+- Pushed CI/CODEOWNERS governance baseline to `dev`.
+- Pushed CI/CODEOWNERS governance baseline to `demo`.
+- Configured and read back branch protection for `main`, `demo`, and `dev`.
+
+### Branch Protection Summary
+
+- `main`: protected; PR required; 1 approval required; stale approvals
+  dismissed; conversation resolution required; linear history required; force
+  push disabled; branch deletion disabled; push restricted to `QilongLu`;
+  admin enforcement enabled. Required checks and CODEOWNERS review are not
+  enabled yet because `main` intentionally contains only an empty `README.md`
+  and has no workflow/CODEOWNERS files.
+- `demo`: protected; PR required; 1 approval required; stale approvals
+  dismissed; CODEOWNERS review required; status checks required and strict;
+  conversation resolution required; linear history required; force push
+  disabled; branch deletion disabled; push restricted to `QilongLu`; admin
+  enforcement enabled.
+- `dev`: protected; PR not required; status checks not required by GitHub
+  protection; linear history required; force push disabled; branch deletion
+  disabled; push restricted to `QilongLu`; admin enforcement enabled.
+
+### Required Checks
+
+- Enabled on `demo`: `desktop-check`, `desktop-build`, `tauri-cargo-test`,
+  `tauri-cargo-check`, `privacy-network-audit`, and `git-diff-check`.
+- Not enabled on `main`: same six checks are missing on `main` because the
+  branch was reset to an empty README as requested.
+- Not enabled on `dev`: by design, the dev agent may push directly after
+  running the full local verification command set.
+
+### Direct Push Policy
+
+- `main`: external contributors cannot direct push; `QilongLu` is the only
+  restricted push/bypass user for emergency owner use.
+- `demo`: external contributors cannot direct push; `QilongLu` is the only
+  restricted push/bypass user.
+- `dev`: external contributors cannot direct push; `QilongLu` is the only
+  restricted push user for maintainer/dev-agent development.
+
+### Manual Follow-up
+
+- When `main` receives release content, add CI/CODEOWNERS to `main` through the
+  release PR and then enable the same six required checks plus CODEOWNERS review
+  on `main`.
