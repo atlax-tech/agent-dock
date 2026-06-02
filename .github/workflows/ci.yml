@@ -1,0 +1,95 @@
+name: ci
+
+on:
+  pull_request:
+    branches:
+      - main
+      - demo
+      - dev
+  push:
+    branches:
+      - main
+      - demo
+      - dev
+
+jobs:
+  desktop-check:
+    name: desktop-check
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npm run check
+
+  desktop-build:
+    name: desktop-build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop frontend
+        run: npm run build
+
+  tauri-cargo-test:
+    name: tauri-cargo-test
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cargo test
+        working-directory: apps/desktop/src-tauri
+        run: cargo test
+
+  tauri-cargo-check:
+    name: tauri-cargo-check
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cargo check
+        working-directory: apps/desktop/src-tauri
+        run: cargo check
+
+  privacy-network-audit:
+    name: privacy-network-audit
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Static privacy and network audit
+        run: |
+          ! rg -n "fetch\\(|XMLHttpRequest|sendBeacon|WebSocket" apps/desktop/src apps/desktop/src-tauri/src
+
+  git-diff-check:
+    name: git-diff-check
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Git whitespace check
+        run: git diff --check

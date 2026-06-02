@@ -67,3 +67,40 @@ market, chat UI, automatic secret migration, or real OpenClaw/Hermes scanning.
 
 Finish Phase 0 verification, push `main`, create `demo` and `dev`, then continue
 Phase 1 from the `dev` branch after user approval.
+
+## 2026-06-02 - Branch Protection Preparation
+
+### Phase
+
+Repository governance before Phase 1.
+
+### Implemented
+
+- Added `.github/CODEOWNERS` with `@QilongLu` as the confirmed GitHub owner
+  account.
+- Added `.github/workflows/ci.yml` with the required Phase 0/Phase 1 baseline
+  checks:
+  `desktop-check`, `desktop-build`, `tauri-cargo-test`,
+  `tauri-cargo-check`, `privacy-network-audit`, and `git-diff-check`.
+
+### Branch Model
+
+Target branch flow:
+
+```text
+task/* or phase/* or fix/*
+        -> dev
+        -> demo
+        -> main
+```
+
+Allowed temporary branch prefixes: `task/*`, `phase/*`, `fix/*`, `release/*`.
+Forbidden long-lived development branches: `hot-dev`, `agent-dev`,
+`dev-agent`, `phase-dev`, and `staging-dev`.
+
+### Pending Verification
+
+- Run the full local dev-agent pre-push verification command set.
+- Push CI/CODEOWNERS to `dev`.
+- Clear `main` content so only an empty `README.md` remains.
+- Configure and read back branch protection for `main`, `demo`, and `dev`.
