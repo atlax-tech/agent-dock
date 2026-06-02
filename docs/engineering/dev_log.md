@@ -558,3 +558,181 @@ hardening.
   Agent Detail interactions.
 - Broaden real-world OpenClaw/Hermes provider schema fixtures before migration
   or skill/channel mutation phases.
+
+## 2026-06-02 - Phase 3 P1 安全修复 + Phase 4 生命周期管理
+
+### Phase
+
+Phase 3 P1 安全修复 + Phase 4 - Create / Duplicate / Delete 生命周期管理。
+
+### 产品边界
+
+AgentDock 保持 local-only 桌面仪表盘。本轮不实现 Web UI 管理、SaaS、登录、云同步、
+远程后端、遥测、账号系统、在线市场、聊天 UI、自动密钥迁移或远程桌面。
+
+### Phase 3 P1 安全修复
+
+修复了 Phase 3 遗留的 P1 安全问题：
+
+1. **resolve_config_target 不再从递归 config_paths 中随便排序取第一个文件**：
+   - 新增 `MAIN_CONFIG_FILE_NAMES` 常量，定义 8 个合法主配置文件名
+   - 新增 `is_main_config_in_root()` 函数，验证配置文件是 agent root 的直接子文件且文件名在白名单中
+   - 多个主配置文件时返回 "Ambiguous" 错误，要求用户手动选择
+   - 无主配置文件时按 runtime 默认创建 config.json（OpenClaw）或 config.yaml（Hermes）
+
+2. **禁止把 runtime root/global/container 当成可写 agent/profile**：
+   - 新增 `is_runtime_root_or_container()` 函数
+   - 检测 `~/.openclaw`、`~/.hermes`、`~/.openclaw/agents`、`~/.hermes/profiles`
+   - 在 `resolve_config_target()` 中调用此函数，命中时直接返回错误
+   - 使用 canonicalize 进行路径比较，同时保留非 canonical 路径的回退比较
+
+3. **affectsOnlySelectedAgentProfile 不再硬编码 true**：
+   - 改为 `!is_runtime_root_or_container(&agent.root_path) && target.starts_with(&agent.root_path)`
+   - 由真实 scope 校验结果决定
+
+4. **新增 4 个安全单测**：
+   - `runtime_root_rejected_as_provider_model_target`
+   - `nested_skill_config_not_selected_as_provider_model_target`
+   - `ambiguous_main_config_files_block_provider_model_update`
+   - `provider_model_target_must_be_main_config_in_root`
+
+### Phase 4 实现
+
+#### 后端生命周期命令（lifecycle.rs）
+
+新增 11 个 Tauri 命令：
+
+| 命令 | 功能 |
+|------|------|
+| `create_agent_plan` | 创建 OpenClaw agent 的计划 |
+| `apply_create_agent` | 执行创建 agent |
+| `create_profile_plan` | 创建 Hermes profile 的计划 |
+| `apply_create_profile` | 执行创建 profile |
+| `duplicate_agent_plan` | 复制 agent/profile 的计划 |
+| `apply_duplicate_agent` | 执行复制 |
+| `delete_agent_plan` | 软删除 agent 的计划 |
+| `apply_delete_agent` | 执行软删除 |
+| `list_trash_items` | 列出回收站条目 |
+| `restore_trash_item_plan` | 恢复回收站项目的计划 |
+| `apply_restore_trash_item` | 执行恢复 |
+
+#### 创建 OpenClaw Agent
+
+最小结构：
+- agent root 目录
+- config.json 主配置文件（含 name 字段）
+- SOUL.md 空模板
+- skills/ 空目录
+
+不写全局 OpenClaw 配置。不自动创建 channel/token/secret。
+
+#### 创建 Hermes Profile
+
+最小结构：
+- profile root 目录
+- config.yaml 主配置文件（含 name 字段）
+- SOUL.md 空模板
+- skills/ 空目录
+
+不写全局 Hermes 配置。不自动创建 channel/token/secret。
+
+#### 复制 Agent/Profile
+
+复制范围：
+- 主配置文件
+- SOUL.md / AGENTS.md / USER.md
+- skills/ 文件夹中的普通文件
+
+必须跳过：
+- sessions / memory / logs / cache / history / conversations / transcripts
+- credentials / tokens / .env
+- channel secret / pairing state
+
+复制前生成 preview，明确显示 included / skipped。
+
+#### 软删除与 Trash
+
+- 删除只移动目录到 `~/.agentdock/trash/<runtime>/<slug>/<timestamp>`，不 rm -rf
+- 删除前创建 trash manifest（含 original_path、runtime、name、deleted_at）
+- 恢复从 trash 移回原路径；如果原路径已存在，必须 block，不得覆盖
+- Trash 页面显示 runtime、name、originalPath、trashPath、deletedAt
+
+#### 前端 UI
+
+- 侧边栏导航增加 Trash 入口
+- Agents 面板增加 New OpenClaw Agent / New Hermes Profile / Duplicate / Delete 按钮
+- 所有按钮走 plan → confirm apply 流程
+- 风险面板显示 affected path / backup path / skipped private data
+- 创建/复制/删除/恢复后 re-scan 并刷新 agent list
+- 对 root/global/container record 禁用 destructive 和 provider/model mutation 操作
+
+### 修改文件
+
+- `apps/desktop/src-tauri/src/commands/lifecycle.rs` — 新增生命周期命令模块
+- `apps/desktop/src-tauri/src/commands/providers.rs` — P1 安全修复
+- `apps/desktop/src-tauri/src/commands/mod.rs` — 添加 lifecycle 模块
+- `apps/desktop/src-tauri/src/lib.rs` — 注册 11 个新命令
+- `apps/desktop/src/app/App.tsx` — 前端生命周期 UI
+- `apps/desktop/src/app/styles.css` — 新增生命周期样式
+- `docs/engineering/dev_log.md` — 开发日志
+
+### 隐私边界
+
+- 前端不发送任意文件路径进行生命周期操作
+- 后端从索引 agent 元数据推导目标路径
+- 目标路径必须在 agent/profile root 内；symlink 逃逸被拒绝
+- Session、memory、history、transcript、log、env、token、secret、credential 文件不可通过生命周期命令读写
+- Provider/channel secret 字段继续只显示脱敏标记
+- 不写全局 OpenClaw/Hermes 配置
+- 不自动创建 channel/token/secret
+- 无网络请求、遥测、登录、云同步、聊天 UI、Provider 管理器、Model 管理器、Skill 管理器、Channel 管理器、迁移、市场或 SaaS 后端
+
+### 后端新增单测
+
+- `validate_agent_name_rejects_empty`
+- `validate_agent_name_rejects_dot_prefix`
+- `validate_agent_name_rejects_path_separators`
+- `validate_agent_name_accepts_valid`
+- `is_private_data_dir_detects_sessions`
+- `is_private_data_file_detects_env`
+- `create_agent_plan_succeeds_for_new_path`
+- `create_agent_plan_blocks_if_target_exists`
+- `create_profile_plan_succeeds_for_new_path`
+- `delete_agent_plan_blocks_runtime_root`
+- `trash_manifest_round_trip`
+- `compute_plan_hash_is_deterministic`
+- `collect_duplicate_items_skips_private_dirs_and_files`
+- `runtime_root_rejected_as_provider_model_target`
+- `nested_skill_config_not_selected_as_provider_model_target`
+- `ambiguous_main_config_files_block_provider_model_update`
+- `provider_model_target_must_be_main_config_in_root`
+
+### 测试结果
+
+- `npm run check`：通过
+- `npm run build`：通过（31 modules, 232.42 kB JS + 10.19 kB CSS）
+- `cargo test`：52 个测试全部通过
+- `cargo check`：通过
+- `git diff --check`：通过
+- 隐私网络审计通过：无 fetch/XMLHttpRequest/sendBeacon/WebSocket 命中
+
+### 真实 Hermes/OpenClaw 触碰状态
+
+- 真实 `~/.hermes`、`~/.openclaw`、workspace、provider config、channel config、
+  global config、tokens、pairing state、sessions、memory、logs、transcript 路径未被触碰
+- 未创建真实测试 agent/profile
+
+### 已知风险
+
+- 前端仍无专用自动化 Tauri UI 测试框架；命令行为由 Rust 测试覆盖，渲染浏览器冒烟为静态
+- 创建 agent/profile 默认路径为 `~/.openclaw/agents/<name>` 和
+  `~/.hermes/profiles/<name>`；sandbox 测试需手动指定 target_root
+- 选中文件夹扫描仍使用文本路径输入而非原生文件夹选择器
+- 恢复操作如果原路径已存在则 block，但不提供自动重命名选项
+
+### 下一步建议
+
+- 添加原生文件夹选择器支持
+- 添加桌面运行时 UI 测试框架
+- 在迁移或 skill/channel 变更阶段前扩展真实 OpenClaw/Hermes provider schema fixtures
+- 考虑恢复时提供重命名选项而非直接 block

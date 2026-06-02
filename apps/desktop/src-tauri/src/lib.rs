@@ -34,7 +34,18 @@ pub fn run() {
             commands::providers::validate_openai_provider,
             commands::providers::scan_ollama_runtime,
             commands::providers::scan_lmstudio_runtime,
-            commands::providers::scan_comfy_runtime
+            commands::providers::scan_comfy_runtime,
+            commands::lifecycle::create_agent_plan,
+            commands::lifecycle::apply_create_agent,
+            commands::lifecycle::create_profile_plan,
+            commands::lifecycle::apply_create_profile,
+            commands::lifecycle::duplicate_agent_plan,
+            commands::lifecycle::apply_duplicate_agent,
+            commands::lifecycle::delete_agent_plan,
+            commands::lifecycle::apply_delete_agent,
+            commands::lifecycle::list_trash_items,
+            commands::lifecycle::restore_trash_item_plan,
+            commands::lifecycle::apply_restore_trash_item
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AgentDock desktop app");

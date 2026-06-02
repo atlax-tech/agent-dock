@@ -246,7 +246,43 @@ type ComfyScanResult = {
   warnings: string[];
 };
 
-const navigation = ["Dashboard", "Scan", "Agents", "Settings"];
+type LifecyclePlan = {
+  planHash: string;
+  operation: string;
+  runtime: RuntimeKind;
+  targetPath: string;
+  willCreateFiles: string[];
+  willBackup: boolean;
+  backupPath?: string;
+  warnings: string[];
+  blockedReason?: string;
+  includedFiles?: string[];
+  skippedItems?: string[];
+};
+
+type LifecycleResult = {
+  operation: string;
+  runtime: RuntimeKind;
+  targetPath: string;
+  backupPath?: string;
+  scanResult: AgentRecord[];
+};
+
+type TrashItem = {
+  trashPath: string;
+  originalPath: string;
+  runtime: RuntimeKind;
+  name: string;
+  deletedAt: string;
+  manifest: {
+    originalPath: string;
+    runtime: string;
+    name: string;
+    deletedAt: string;
+  };
+};
+
+const navigation = ["Dashboard", "Scan", "Agents", "Trash", "Settings"];
 const personalityKinds: PersonalityFileKind[] = ["soul", "agents", "user"];
 const providerKinds: ProviderKind[] = [
   "openai-compatible",
@@ -360,6 +396,15 @@ export function App() {
   const [runtimeScan, setRuntimeScan] = useState<LocalRuntimeScanResult | null>(null);
   const [comfyScan, setComfyScan] = useState<ComfyScanResult | null>(null);
   const [comfyPath, setComfyPath] = useState("");
+  const [lifecyclePlan, setLifecyclePlan] = useState<LifecyclePlan | null>(null);
+  const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
+  const [newAgentName, setNewAgentName] = useState("");
+  const [newProfileName, setNewProfileName] = useState("");
+  const [duplicateName, setDuplicateName] = useState("");
+  const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [showCreateProfile, setShowCreateProfile] = useState(false);
+  const [showDuplicate, setShowDuplicate] = useState(false);
+  const [activeNav, setActiveNav] = useState("Dashboard");
 
   async function refreshIndex() {
     const [scanRoots, indexedAgents] = await Promise.all([
@@ -457,6 +502,12 @@ export function App() {
     providerForm.defaultModel,
     providerForm.fallbackModel,
   ]);
+
+  useEffect(() => {
+    if (activeNav === "Trash" && isTauriRuntime()) {
+      void loadTrashItems();
+    }
+  }, [activeNav]);
 
   const detectedRuntimes = useMemo(
     () => ({
@@ -825,6 +876,209 @@ export function App() {
     }
   }
 
+  async function createAgentPlan() {
+    if (!newAgentName.trim()) return;
+    setRuntimeError(null);
+    setStatus("Creating agent plan");
+    try {
+      const result = await invoke<LifecyclePlan>("create_agent_plan", {
+        request: { name: newAgentName.trim() },
+      });
+      setLifecyclePlan(result);
+      if (result.blockedReason) {
+        setStatus(`Blocked: ${result.blockedReason}`);
+      } else {
+        setStatus("Agent creation plan ready; review before applying");
+      }
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Agent plan failed");
+    }
+  }
+
+  async function applyCreateAgent() {
+    if (!lifecyclePlan || lifecyclePlan.operation !== "create_agent") return;
+    setRuntimeError(null);
+    setStatus("Creating agent with backup and atomic write");
+    try {
+      await invoke<LifecycleResult>("apply_create_agent", {
+        request: { planHash: lifecyclePlan.planHash },
+      });
+      await refreshIndex();
+      setLifecyclePlan(null);
+      setShowCreateAgent(false);
+      setNewAgentName("");
+      setStatus("Agent created, backed up, and re-scanned");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Agent creation failed");
+    }
+  }
+
+  async function createProfilePlan() {
+    if (!newProfileName.trim()) return;
+    setRuntimeError(null);
+    setStatus("Creating profile plan");
+    try {
+      const result = await invoke<LifecyclePlan>("create_profile_plan", {
+        request: { name: newProfileName.trim() },
+      });
+      setLifecyclePlan(result);
+      if (result.blockedReason) {
+        setStatus(`Blocked: ${result.blockedReason}`);
+      } else {
+        setStatus("Profile creation plan ready; review before applying");
+      }
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Profile plan failed");
+    }
+  }
+
+  async function applyCreateProfile() {
+    if (!lifecyclePlan || lifecyclePlan.operation !== "create_profile") return;
+    setRuntimeError(null);
+    setStatus("Creating profile with backup and atomic write");
+    try {
+      await invoke<LifecycleResult>("apply_create_profile", {
+        request: { planHash: lifecyclePlan.planHash },
+      });
+      await refreshIndex();
+      setLifecyclePlan(null);
+      setShowCreateProfile(false);
+      setNewProfileName("");
+      setStatus("Profile created, backed up, and re-scanned");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Profile creation failed");
+    }
+  }
+
+  async function duplicateAgentPlan() {
+    if (!selectedAgentId || !duplicateName.trim()) return;
+    setRuntimeError(null);
+    setStatus("Creating duplicate plan");
+    try {
+      const result = await invoke<LifecyclePlan>("duplicate_agent_plan", {
+        request: { sourceAgentId: selectedAgentId, newName: duplicateName.trim() },
+      });
+      setLifecyclePlan(result);
+      if (result.blockedReason) {
+        setStatus(`Blocked: ${result.blockedReason}`);
+      } else {
+        setStatus("Duplicate plan ready; review included/skipped items before applying");
+      }
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Duplicate plan failed");
+    }
+  }
+
+  async function applyDuplicateAgent() {
+    if (!lifecyclePlan || lifecyclePlan.operation !== "duplicate") return;
+    setRuntimeError(null);
+    setStatus("Duplicating agent with backup");
+    try {
+      await invoke<LifecycleResult>("apply_duplicate_agent", {
+        request: { planHash: lifecyclePlan.planHash },
+      });
+      await refreshIndex();
+      setLifecyclePlan(null);
+      setShowDuplicate(false);
+      setDuplicateName("");
+      setStatus("Agent duplicated, backed up, and re-scanned");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Duplicate failed");
+    }
+  }
+
+  async function deleteAgentPlan() {
+    if (!selectedAgentId) return;
+    setRuntimeError(null);
+    setStatus("Creating delete plan");
+    try {
+      const result = await invoke<LifecyclePlan>("delete_agent_plan", {
+        request: { agentId: selectedAgentId },
+      });
+      setLifecyclePlan(result);
+      if (result.blockedReason) {
+        setStatus(`Blocked: ${result.blockedReason}`);
+      } else {
+        setStatus("Delete plan ready; review trash path before confirming");
+      }
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Delete plan failed");
+    }
+  }
+
+  async function applyDeleteAgent() {
+    if (!lifecyclePlan || lifecyclePlan.operation !== "delete") return;
+    setRuntimeError(null);
+    setStatus("Moving agent to trash with backup");
+    try {
+      await invoke<LifecycleResult>("apply_delete_agent", {
+        request: { planHash: lifecyclePlan.planHash },
+      });
+      await refreshIndex();
+      setSelectedAgentId(null);
+      setDetail(null);
+      setLifecyclePlan(null);
+      setStatus("Agent moved to trash and re-scanned");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Delete failed");
+    }
+  }
+
+  async function loadTrashItems() {
+    setRuntimeError(null);
+    try {
+      const items = await invoke<TrashItem[]>("list_trash_items");
+      setTrashItems(items);
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function restoreTrashItemPlan(trashPath: string) {
+    setRuntimeError(null);
+    setStatus("Creating restore plan");
+    try {
+      const result = await invoke<LifecyclePlan>("restore_trash_item_plan", {
+        trashPath,
+      });
+      setLifecyclePlan(result);
+      if (result.blockedReason) {
+        setStatus(`Blocked: ${result.blockedReason}`);
+      } else {
+        setStatus("Restore plan ready; confirm to move back from trash");
+      }
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Restore plan failed");
+    }
+  }
+
+  async function applyRestoreTrashItem() {
+    if (!lifecyclePlan || lifecyclePlan.operation !== "restore") return;
+    setRuntimeError(null);
+    setStatus("Restoring from trash");
+    try {
+      await invoke<LifecycleResult>("apply_restore_trash_item", {
+        request: { planHash: lifecyclePlan.planHash },
+      });
+      await refreshIndex();
+      await loadTrashItems();
+      setLifecyclePlan(null);
+      setStatus("Item restored and re-scanned");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Restore failed");
+    }
+  }
+
   return (
     <main className="shell">
       <aside className="sidebar" aria-label="AgentDock navigation">
@@ -839,11 +1093,12 @@ export function App() {
         </div>
 
         <nav className="navList">
-          {navigation.map((item, index) => (
+          {navigation.map((item) => (
             <button
-              className={index === 0 ? "navItem navItemActive" : "navItem"}
+              className={activeNav === item ? "navItem navItemActive" : "navItem"}
               key={item}
               type="button"
+              onClick={() => setActiveNav(item)}
             >
               <span aria-hidden="true" />
               {item}
@@ -880,6 +1135,7 @@ export function App() {
           </div>
         </section>
 
+        {(activeNav === "Dashboard" || activeNav === "Scan" || activeNav === "Agents") ? (
         <div className="workspaceGrid">
           <div className="mainColumn">
             <section className="panel">
@@ -964,6 +1220,24 @@ export function App() {
                 <h3>Agents</h3>
                 <p>OpenClaw agents and Hermes profiles indexed from local metadata only.</p>
               </div>
+              <div className="agentActions">
+                <button type="button" onClick={() => { setShowCreateAgent(true); setLifecyclePlan(null); }}>
+                  New OpenClaw Agent
+                </button>
+                <button type="button" onClick={() => { setShowCreateProfile(true); setLifecyclePlan(null); }}>
+                  New Hermes Profile
+                </button>
+                {selectedAgentId ? (
+                  <>
+                    <button type="button" onClick={() => { setShowDuplicate(true); setDuplicateName(""); setLifecyclePlan(null); }}>
+                      Duplicate
+                    </button>
+                    <button type="button" onClick={() => { setLifecyclePlan(null); void deleteAgentPlan(); }}>
+                      Delete
+                    </button>
+                  </>
+                ) : null}
+              </div>
 
               {agents.length === 0 ? (
                 <div className="emptyState">
@@ -1043,6 +1317,100 @@ export function App() {
                 </div>
               )}
             </section>
+
+            {showCreateAgent ? (
+              <div className="panel">
+                <div className="panelHeader">
+                  <h3>New OpenClaw Agent</h3>
+                  <p>Create a minimal agent structure with config, SOUL.md, and skills/ directory.</p>
+                </div>
+                <div className="createForm">
+                  <label>
+                    <span>Agent name</span>
+                    <input value={newAgentName} onChange={(e) => setNewAgentName(e.target.value)} placeholder="my-agent" />
+                  </label>
+                  <button type="button" disabled={!newAgentName.trim()} onClick={() => void createAgentPlan()}>
+                    Generate plan
+                  </button>
+                  {lifecyclePlan && lifecyclePlan.operation === "create_agent" ? (
+                    <div className="planPreview">
+                      <span>Target: {lifecyclePlan.targetPath}</span>
+                      <span>Files to create: {lifecyclePlan.willCreateFiles.join(", ")}</span>
+                      <span>Backup: {lifecyclePlan.willBackup ? "will be created" : "no"}</span>
+                      {lifecyclePlan.warnings.map((w) => <span key={w}>WARNING: {w}</span>)}
+                      {lifecyclePlan.blockedReason ? <span className="errorBox">BLOCKED: {lifecyclePlan.blockedReason}</span> : null}
+                      {!lifecyclePlan.blockedReason ? (
+                        <button type="button" onClick={() => void applyCreateAgent()}>Confirm create</button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <button type="button" onClick={() => { setShowCreateAgent(false); setNewAgentName(""); setLifecyclePlan(null); }}>Cancel</button>
+                </div>
+              </div>
+            ) : null}
+
+            {showCreateProfile ? (
+              <div className="panel">
+                <div className="panelHeader">
+                  <h3>New Hermes Profile</h3>
+                  <p>Create a minimal profile structure with config, SOUL.md, and skills/ directory.</p>
+                </div>
+                <div className="createForm">
+                  <label>
+                    <span>Profile name</span>
+                    <input value={newProfileName} onChange={(e) => setNewProfileName(e.target.value)} placeholder="my-profile" />
+                  </label>
+                  <button type="button" disabled={!newProfileName.trim()} onClick={() => void createProfilePlan()}>
+                    Generate plan
+                  </button>
+                  {lifecyclePlan && lifecyclePlan.operation === "create_profile" ? (
+                    <div className="planPreview">
+                      <span>Target: {lifecyclePlan.targetPath}</span>
+                      <span>Files to create: {lifecyclePlan.willCreateFiles.join(", ")}</span>
+                      <span>Backup: {lifecyclePlan.willBackup ? "will be created" : "no"}</span>
+                      {lifecyclePlan.warnings.map((w) => <span key={w}>WARNING: {w}</span>)}
+                      {lifecyclePlan.blockedReason ? <span className="errorBox">BLOCKED: {lifecyclePlan.blockedReason}</span> : null}
+                      {!lifecyclePlan.blockedReason ? (
+                        <button type="button" onClick={() => void applyCreateProfile()}>Confirm create</button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <button type="button" onClick={() => { setShowCreateProfile(false); setNewProfileName(""); setLifecyclePlan(null); }}>Cancel</button>
+                </div>
+              </div>
+            ) : null}
+
+            {showDuplicate && selectedAgentId ? (
+              <div className="panel">
+                <div className="panelHeader">
+                  <h3>Duplicate Agent/Profile</h3>
+                  <p>Copy configuration and personality. Private data (sessions, memory, secrets) will be skipped.</p>
+                </div>
+                <div className="createForm">
+                  <label>
+                    <span>New name</span>
+                    <input value={duplicateName} onChange={(e) => setDuplicateName(e.target.value)} placeholder="copy-of-agent" />
+                  </label>
+                  <button type="button" disabled={!duplicateName.trim()} onClick={() => void duplicateAgentPlan()}>
+                    Generate plan
+                  </button>
+                  {lifecyclePlan && lifecyclePlan.operation === "duplicate" ? (
+                    <div className="planPreview">
+                      <span>Target: {lifecyclePlan.targetPath}</span>
+                      <span>Included: {lifecyclePlan.includedFiles?.join(", ") ?? "none"}</span>
+                      <span>Skipped: {lifecyclePlan.skippedItems?.join(", ") ?? "none"}</span>
+                      <span>Backup: {lifecyclePlan.willBackup ? "will be created" : "no"}</span>
+                      {lifecyclePlan.warnings.map((w) => <span key={w}>WARNING: {w}</span>)}
+                      {lifecyclePlan.blockedReason ? <span className="errorBox">BLOCKED: {lifecyclePlan.blockedReason}</span> : null}
+                      {!lifecyclePlan.blockedReason ? (
+                        <button type="button" onClick={() => void applyDuplicateAgent()}>Confirm duplicate</button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <button type="button" onClick={() => { setShowDuplicate(false); setDuplicateName(""); setLifecyclePlan(null); }}>Cancel</button>
+                </div>
+              </div>
+            ) : null}
 
             <section className="panel detailPanel">
               <div className="panelHeader">
@@ -1475,6 +1843,21 @@ export function App() {
                   ))}
                   <pre className="diffBox">{plan.unifiedDiff || "No text changes detected."}</pre>
                 </div>
+              ) : lifecyclePlan && lifecyclePlan.operation === "delete" ? (
+                <div className="diffPanel">
+                  <strong>Delete plan</strong>
+                  <span>Target: {lifecyclePlan.targetPath}</span>
+                  <span>Trash path: {lifecyclePlan.backupPath ?? "N/A"}</span>
+                  <span>Backup: {lifecyclePlan.willBackup ? "will be created" : "no"}</span>
+                  {lifecyclePlan.warnings.map((w) => <span key={w}>WARNING: {w}</span>)}
+                  {lifecyclePlan.blockedReason ? <span className="errorBox">BLOCKED: {lifecyclePlan.blockedReason}</span> : null}
+                  {!lifecyclePlan.blockedReason ? (
+                    <button className="confirmDeleteButton" type="button" onClick={() => void applyDeleteAgent()}>
+                      Confirm delete (move to trash)
+                    </button>
+                  ) : null}
+                  <button type="button" onClick={() => setLifecyclePlan(null)}>Cancel</button>
+                </div>
               ) : (
                 <div className="emptyState">Generate a diff before saving.</div>
               )}
@@ -1486,6 +1869,67 @@ export function App() {
             </section>
           </aside>
         </div>
+        ) : null}
+
+        {activeNav === "Trash" ? (
+          <section className="panel">
+            <div className="panelHeader">
+              <h3>Trash</h3>
+              <p>Soft-deleted agents and profiles. Restore moves them back to the original path.</p>
+            </div>
+            <button type="button" onClick={() => void loadTrashItems()}>Refresh trash</button>
+            {trashItems.length === 0 ? (
+              <div className="emptyState">No items in trash.</div>
+            ) : (
+              <div className="trashTable">
+                <div className="agentHeader">
+                  <span>Name</span>
+                  <span>Runtime</span>
+                  <span>Original path</span>
+                  <span>Trash path</span>
+                  <span>Deleted at</span>
+                  <span>Actions</span>
+                </div>
+                {trashItems.map((item) => (
+                  <article className="agentRow" key={item.trashPath}>
+                    <div><strong>{item.name}</strong></div>
+                    <div>{runtimeLabel(item.runtime)}</div>
+                    <div className="pathText">{item.originalPath}</div>
+                    <div className="pathText">{item.trashPath}</div>
+                    <div>{formatBackupTime(item.deletedAt)}</div>
+                    <div>
+                      {lifecyclePlan && lifecyclePlan.operation === "restore" && lifecyclePlan.targetPath === item.originalPath ? (
+                        <div className="planPreview">
+                          <span>Restore to: {lifecyclePlan.targetPath}</span>
+                          {lifecyclePlan.blockedReason ? <span className="errorBox">BLOCKED: {lifecyclePlan.blockedReason}</span> : null}
+                          {!lifecyclePlan.blockedReason ? (
+                            <button type="button" onClick={() => void applyRestoreTrashItem()}>Confirm restore</button>
+                          ) : null}
+                          <button type="button" onClick={() => setLifecyclePlan(null)}>Cancel</button>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={() => void restoreTrashItemPlan(item.trashPath)}>
+                          Restore
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+            {runtimeError ? <div className="errorBox">{runtimeError}</div> : null}
+          </section>
+        ) : null}
+
+        {activeNav === "Settings" ? (
+          <section className="panel">
+            <div className="panelHeader">
+              <h3>Settings</h3>
+              <p>Application settings will be available in a future update.</p>
+            </div>
+            <div className="emptyState">Settings page is not yet implemented.</div>
+          </section>
+        ) : null}
       </section>
     </main>
   );

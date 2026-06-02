@@ -351,6 +351,8 @@ fn create_model_provider_update_plan_with_connection(
             "Selected effective model may call a remote API and may create cost.".to_string(),
         );
     }
+    let affects_only_selected = !is_runtime_root_or_container(&agent.root_path)
+        && target.starts_with(&agent.root_path);
     Ok(ModelProviderUpdatePlan {
         agent_id: agent.id,
         runtime: agent.runtime,
@@ -364,7 +366,7 @@ fn create_model_provider_update_plan_with_connection(
         unified_diff: unified_diff("model-provider-config", &current.content, &new_content),
         warnings,
         backup_will_be_created: true,
-        affects_only_selected_agent_profile: true,
+        affects_only_selected_agent_profile: affects_only_selected,
         effective_model_before: effective_before,
         effective_model_after: effective_after,
     })
@@ -968,33 +970,107 @@ fn set_toml_optional(
     }
 }
 
+const MAIN_CONFIG_FILE_NAMES: &[&str] = &[
+    "config.json",
+    "config.yaml",
+    "config.yml",
+    "config.toml",
+    "profile.json",
+    "profile.yaml",
+    "profile.yml",
+    "profile.toml",
+];
+
+fn is_runtime_root_or_container(root_path: &Path) -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    let blocked = [
+        home.join(".openclaw"),
+        home.join(".hermes"),
+        home.join(".openclaw").join("agents"),
+        home.join(".hermes").join("profiles"),
+    ];
+    let canonical = match fs::canonicalize(root_path) {
+        Ok(c) => c,
+        Err(_) => {
+            for blocked_path in &blocked {
+                if root_path == blocked_path {
+                    return true;
+                }
+            }
+            return false;
+        }
+    };
+    for blocked_path in &blocked {
+        if let Ok(blocked_canonical) = fs::canonicalize(blocked_path) {
+            if canonical == blocked_canonical {
+                return true;
+            }
+        } else if root_path == blocked_path {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_main_config_in_root(path: &Path, root: &Path) -> bool {
+    let file_name = match path.file_name().and_then(|n| n.to_str()) {
+        Some(name) => name,
+        None => return false,
+    };
+    if !MAIN_CONFIG_FILE_NAMES.contains(&file_name) {
+        return false;
+    }
+    let parent = match path.parent() {
+        Some(p) => p,
+        None => return false,
+    };
+    let canonical_root = fs::canonicalize(root).ok();
+    let canonical_parent = fs::canonicalize(parent).ok();
+    match (canonical_root, canonical_parent) {
+        (Some(r), Some(p)) => p == r,
+        _ => parent == root,
+    }
+}
+
 fn resolve_config_target(agent: &AgentScanRecord) -> Result<PathBuf, String> {
     if is_private_runtime_dir(&agent.root_path) {
         return Err("Agent root is private runtime data and cannot be edited.".to_string());
     }
+    if is_runtime_root_or_container(&agent.root_path) {
+        return Err(
+            "Runtime root/global/container directories are not writable targets for provider/model updates."
+                .to_string(),
+        );
+    }
     let root = fs::canonicalize(&agent.root_path)
         .map_err(|_| "Agent root is not accessible. Re-scan before editing.".to_string())?;
-    let mut candidates = agent
+    let main_configs: Vec<PathBuf> = agent
         .config_paths
         .iter()
-        .filter(|path| {
-            path.extension()
-                .and_then(|value| value.to_str())
-                .map(|extension| {
-                    matches!(
-                        extension.to_ascii_lowercase().as_str(),
-                        "json" | "yaml" | "yml" | "toml"
-                    )
-                })
-                .unwrap_or(false)
-        })
+        .filter(|path| is_main_config_in_root(path, &agent.root_path))
         .cloned()
-        .collect::<Vec<_>>();
-    candidates.sort();
-    let target = candidates
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| agent.root_path.join("config.json"));
+        .collect();
+    if main_configs.len() > 1 {
+        let names: Vec<String> = main_configs
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+            .collect();
+        return Err(format!(
+            "Ambiguous main config files in agent root: {}. Please keep only one main config file (config.json, config.yaml, config.yml, config.toml, profile.json, profile.yaml, profile.yml, or profile.toml).",
+            names.join(", ")
+        ));
+    }
+    let target = if let Some(config) = main_configs.into_iter().next() {
+        config
+    } else {
+        let default_name = match agent.runtime {
+            AgentRuntime::OpenClaw => "config.json",
+            AgentRuntime::Hermes => "config.yaml",
+        };
+        agent.root_path.join(default_name)
+    };
     let parent = target
         .parent()
         .ok_or_else(|| "Provider/model target has no parent directory.".to_string())?;
@@ -1536,5 +1612,117 @@ mod tests {
             stream.write_all(response.as_bytes()).expect("write");
         });
         format!("http://{address}")
+    }
+
+    #[test]
+    fn runtime_root_rejected_as_provider_model_target() {
+        let real_home = dirs::home_dir().expect("home");
+        let openclaw_root = real_home.join(".openclaw");
+        let agent = AgentScanRecord {
+            id: "openclaw:runtime-root".to_string(),
+            runtime: AgentRuntime::OpenClaw,
+            name: "Runtime Root".to_string(),
+            root_path: openclaw_root.clone(),
+            config_paths: vec![openclaw_root.join("config.json")],
+            personality_files: Vec::new(),
+            skill_paths: Vec::new(),
+            provider_summary: ProviderSummary::default(),
+            model_summary: ModelSummary::default(),
+            channel_summary: ChannelSummary::default(),
+            warnings: Vec::new(),
+            health_status: HealthStatus::Warning,
+            last_scanned_at: "1".to_string(),
+        };
+        let error = resolve_config_target(&agent).expect_err("runtime root blocked");
+        assert!(
+            error.contains("Runtime root/global/container"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn nested_skill_config_not_selected_as_provider_model_target() {
+        let home = tempdir().expect("home");
+        let root = home.path().join("my-agent");
+        let skill_dir = root.join("skills").join("my-skill");
+        fs::create_dir_all(&skill_dir).expect("skill dir");
+        fs::write(root.join("config.json"), r#"{"name":"test"}"#).expect("root config");
+        fs::write(skill_dir.join("config.json"), r#"{"name":"skill"}"#)
+            .expect("skill config");
+        let agent = AgentScanRecord {
+            id: "openclaw:nested-test".to_string(),
+            runtime: AgentRuntime::OpenClaw,
+            name: "Nested Test".to_string(),
+            root_path: root.clone(),
+            config_paths: vec![
+                root.join("config.json"),
+                skill_dir.join("config.json"),
+            ],
+            personality_files: Vec::new(),
+            skill_paths: Vec::new(),
+            provider_summary: ProviderSummary::default(),
+            model_summary: ModelSummary::default(),
+            channel_summary: ChannelSummary::default(),
+            warnings: Vec::new(),
+            health_status: HealthStatus::Warning,
+            last_scanned_at: "1".to_string(),
+        };
+        let target = resolve_config_target(&agent).expect("target resolved");
+        assert_eq!(target, root.join("config.json"));
+        assert_ne!(target, skill_dir.join("config.json"));
+    }
+
+    #[test]
+    fn ambiguous_main_config_files_block_provider_model_update() {
+        let home = tempdir().expect("home");
+        let root = home.path().join("ambiguous-agent");
+        fs::create_dir_all(&root).expect("root");
+        fs::write(root.join("config.json"), r#"{"name":"test"}"#).expect("json config");
+        fs::write(root.join("config.yaml"), "name: test\n").expect("yaml config");
+        let agent = AgentScanRecord {
+            id: "openclaw:ambiguous".to_string(),
+            runtime: AgentRuntime::OpenClaw,
+            name: "Ambiguous Agent".to_string(),
+            root_path: root.clone(),
+            config_paths: vec![root.join("config.json"), root.join("config.yaml")],
+            personality_files: Vec::new(),
+            skill_paths: Vec::new(),
+            provider_summary: ProviderSummary::default(),
+            model_summary: ModelSummary::default(),
+            channel_summary: ChannelSummary::default(),
+            warnings: Vec::new(),
+            health_status: HealthStatus::Warning,
+            last_scanned_at: "1".to_string(),
+        };
+        let error = resolve_config_target(&agent).expect_err("ambiguous blocked");
+        assert!(
+            error.contains("Ambiguous main config"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn provider_model_target_must_be_main_config_in_root() {
+        let home = tempdir().expect("home");
+        let root = home.path().join("valid-agent");
+        fs::create_dir_all(&root).expect("root");
+        fs::write(root.join("config.json"), r#"{"name":"valid"}"#).expect("config");
+        let agent = AgentScanRecord {
+            id: "openclaw:valid".to_string(),
+            runtime: AgentRuntime::OpenClaw,
+            name: "Valid Agent".to_string(),
+            root_path: root.clone(),
+            config_paths: vec![root.join("config.json")],
+            personality_files: Vec::new(),
+            skill_paths: Vec::new(),
+            provider_summary: ProviderSummary::default(),
+            model_summary: ModelSummary::default(),
+            channel_summary: ChannelSummary::default(),
+            warnings: Vec::new(),
+            health_status: HealthStatus::Warning,
+            last_scanned_at: "1".to_string(),
+        };
+        let target = resolve_config_target(&agent).expect("target resolved");
+        assert_eq!(target, root.join("config.json"));
     }
 }
