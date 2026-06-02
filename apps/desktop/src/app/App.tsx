@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 type RuntimeKind = "openClaw" | "hermes";
 type PersonalityFileKind = "soul" | "agents" | "user";
-type DetailTab = "overview" | "personality" | "files" | "backups";
+type DetailTab = "overview" | "personality" | "modelProvider" | "files" | "backups";
+type ProviderKind = "openai-compatible" | "ollama" | "lmstudio" | "comfyui" | "custom";
 
 type ScanRoot = {
   runtime: RuntimeKind;
@@ -123,6 +124,20 @@ type PersonalityPlan = {
   backupWillBeCreated: boolean;
 };
 
+type PersonalityRestorePlan = {
+  backupId: string;
+  agentId: string;
+  runtime: RuntimeKind;
+  fileKind: PersonalityFileKind;
+  targetPath: string;
+  backupPath: string;
+  currentHash: string;
+  restoredHash: string;
+  unifiedDiff: string;
+  warnings: string[];
+  safetyBackupWillBeCreated: boolean;
+};
+
 type BackupRecord = {
   backupId: string;
   agentId: string;
@@ -135,8 +150,111 @@ type BackupRecord = {
   contentHashAfter: string;
 };
 
+type ProviderProfile = {
+  id: string;
+  name: string;
+  kind: ProviderKind;
+  baseUrl?: string;
+  apiKeyRef?: string;
+  defaultModel?: string;
+  fallbackModel?: string;
+  validationJson: string;
+  updatedAt: string;
+};
+
+type ProviderForm = {
+  providerId?: string;
+  name: string;
+  kind: ProviderKind;
+  baseUrl: string;
+  apiKeyRef: string;
+  defaultModel: string;
+  fallbackModel: string;
+};
+
+type EffectiveModelStep = {
+  label: string;
+  model?: string;
+  active: boolean;
+  reason: string;
+  localOnly: boolean;
+  mayCallRemoteApi: boolean;
+  mayCreateCost: boolean;
+};
+
+type EffectiveModelPreview = {
+  effectiveModel?: string;
+  source: string;
+  explanation: string;
+  localOnly: boolean;
+  mayCallRemoteApi: boolean;
+  mayCreateCost: boolean;
+  steps: EffectiveModelStep[];
+  warnings: string[];
+};
+
+type ModelProviderPlan = {
+  agentId: string;
+  runtime: RuntimeKind;
+  targetFiles: string[];
+  oldProviderSummary: AgentRecord["providerSummary"];
+  newProviderSummary: AgentRecord["providerSummary"];
+  oldModelSummary: AgentRecord["modelSummary"];
+  newModelSummary: AgentRecord["modelSummary"];
+  oldHash: string;
+  newHash: string;
+  unifiedDiff: string;
+  warnings: string[];
+  backupWillBeCreated: boolean;
+  affectsOnlySelectedAgentProfile: boolean;
+  effectiveModelBefore: EffectiveModelPreview;
+  effectiveModelAfter: EffectiveModelPreview;
+};
+
+type ProviderValidationReport = {
+  baseUrlValid: boolean;
+  apiKeyReferenceStatus: string;
+  connectionStatus: string;
+  authStatus: string;
+  modelListStatus: string;
+  generationStatus: string;
+  models: string[];
+  warnings: string[];
+};
+
+type RuntimeModel = {
+  name: string;
+  modified?: string;
+  size?: number;
+};
+
+type LocalRuntimeScanResult = {
+  runtime: string;
+  endpoint?: string;
+  reachable: boolean;
+  models: RuntimeModel[];
+  warnings: string[];
+};
+
+type ComfyScanResult = {
+  providerKind: string;
+  isChatLlmProvider: boolean;
+  detectedPaths: string[];
+  capabilityFolders: { kind: string; path: string; models: string[] }[];
+  endpoint?: string;
+  endpointReachable: boolean;
+  warnings: string[];
+};
+
 const navigation = ["Dashboard", "Scan", "Agents", "Settings"];
 const personalityKinds: PersonalityFileKind[] = ["soul", "agents", "user"];
+const providerKinds: ProviderKind[] = [
+  "openai-compatible",
+  "ollama",
+  "lmstudio",
+  "comfyui",
+  "custom",
+];
 
 function isTauriRuntime() {
   return "__TAURI_INTERNALS__" in window;
@@ -175,6 +293,47 @@ function formatBackupTime(value: string) {
   return value;
 }
 
+function defaultProviderForm(): ProviderForm {
+  return {
+    name: "",
+    kind: "openai-compatible",
+    baseUrl: "",
+    apiKeyRef: "",
+    defaultModel: "",
+    fallbackModel: "",
+  };
+}
+
+function providerKindFromSummary(provider?: string): ProviderKind {
+  const normalized = provider?.toLowerCase() ?? "";
+  if (normalized.includes("ollama")) {
+    return "ollama";
+  }
+  if (normalized.includes("lmstudio") || normalized.includes("lm studio")) {
+    return "lmstudio";
+  }
+  if (normalized.includes("comfy")) {
+    return "comfyui";
+  }
+  if (normalized.includes("custom")) {
+    return "custom";
+  }
+  return "openai-compatible";
+}
+
+function providerUpdateFromForm(agentId: string, form: ProviderForm) {
+  return {
+    agentId,
+    providerId: form.providerId,
+    providerName: form.name || form.kind,
+    kind: form.kind,
+    baseUrl: form.baseUrl || undefined,
+    apiKeyRef: form.apiKeyRef || undefined,
+    defaultModel: form.defaultModel || undefined,
+    fallbackModel: form.fallbackModel || undefined,
+  };
+}
+
 export function App() {
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [roots, setRoots] = useState<ScanRoot[]>([]);
@@ -191,7 +350,16 @@ export function App() {
   const [personalityRead, setPersonalityRead] = useState<PersonalityRead | null>(null);
   const [editorContent, setEditorContent] = useState("");
   const [plan, setPlan] = useState<PersonalityPlan | null>(null);
+  const [restorePlan, setRestorePlan] = useState<PersonalityRestorePlan | null>(null);
   const [backups, setBackups] = useState<BackupRecord[]>([]);
+  const [providerProfiles, setProviderProfiles] = useState<ProviderProfile[]>([]);
+  const [providerForm, setProviderForm] = useState<ProviderForm>(() => defaultProviderForm());
+  const [modelPlan, setModelPlan] = useState<ModelProviderPlan | null>(null);
+  const [effectivePreview, setEffectivePreview] = useState<EffectiveModelPreview | null>(null);
+  const [validationReport, setValidationReport] = useState<ProviderValidationReport | null>(null);
+  const [runtimeScan, setRuntimeScan] = useState<LocalRuntimeScanResult | null>(null);
+  const [comfyScan, setComfyScan] = useState<ComfyScanResult | null>(null);
+  const [comfyPath, setComfyPath] = useState("");
 
   async function refreshIndex() {
     const [scanRoots, indexedAgents] = await Promise.all([
@@ -209,6 +377,11 @@ export function App() {
     ]);
     setDetail(nextDetail);
     setBackups(nextBackups);
+  }
+
+  async function refreshProviderProfiles() {
+    const profiles = await invoke<ProviderProfile[]>("list_provider_profiles");
+    setProviderProfiles(profiles);
   }
 
   useEffect(() => {
@@ -230,6 +403,60 @@ export function App() {
         setRuntimeError(error instanceof Error ? error.message : String(error));
       });
   }, []);
+
+  useEffect(() => {
+    if (!detail) {
+      setProviderForm(defaultProviderForm());
+      setEffectivePreview(null);
+      return;
+    }
+    setProviderForm({
+      name: detail.providerSummary.provider ?? "",
+      kind: providerKindFromSummary(detail.providerSummary.provider),
+      baseUrl: detail.providerSummary.baseUrl ?? "",
+      apiKeyRef: detail.providerSummary.secretFields.length > 0 ? "ENV_OR_KEYCHAIN_REF" : "",
+      defaultModel: detail.modelSummary.defaultModel ?? "",
+      fallbackModel: detail.modelSummary.fallbackModel ?? "",
+    });
+    setModelPlan(null);
+    setValidationReport(null);
+    setRuntimeScan(null);
+    setComfyScan(null);
+    setComfyPath("");
+    setRestorePlan(null);
+  }, [detail]);
+
+  useEffect(() => {
+    if (!selectedAgentId || !isTauriRuntime()) {
+      return;
+    }
+    void invoke<EffectiveModelPreview>("resolve_effective_model_preview", {
+      request: {
+        agentId: selectedAgentId,
+        provider: {
+          name: providerForm.name || providerForm.kind,
+          kind: providerForm.kind,
+          baseUrl: providerForm.baseUrl || undefined,
+          apiKeyRef: providerForm.apiKeyRef || undefined,
+          defaultModel: providerForm.defaultModel || undefined,
+          fallbackModel: providerForm.fallbackModel || undefined,
+          validationJson: "{}",
+        },
+      },
+    })
+      .then(setEffectivePreview)
+      .catch(() => {
+        setEffectivePreview(null);
+      });
+  }, [
+    selectedAgentId,
+    providerForm.name,
+    providerForm.kind,
+    providerForm.baseUrl,
+    providerForm.apiKeyRef,
+    providerForm.defaultModel,
+    providerForm.fallbackModel,
+  ]);
 
   const detectedRuntimes = useMemo(
     () => ({
@@ -335,10 +562,15 @@ export function App() {
     setPersonalityRead(null);
     setEditorContent("");
     setPlan(null);
+    setRestorePlan(null);
+    setModelPlan(null);
+    setValidationReport(null);
+    setRuntimeScan(null);
+    setComfyScan(null);
     setRuntimeError(null);
     setStatus("Opening agent detail");
     try {
-      await refreshAgentDetail(agentId);
+      await Promise.all([refreshAgentDetail(agentId), refreshProviderProfiles()]);
       setStatus("Agent detail ready");
     } catch (error) {
       setRuntimeError(error instanceof Error ? error.message : String(error));
@@ -382,6 +614,8 @@ export function App() {
         expectedHash: personalityRead.contentHash,
       });
       setPlan(result);
+      setRestorePlan(null);
+      setModelPlan(null);
       setStatus("Diff plan ready; review target path and warnings before saving");
     } catch (error) {
       setRuntimeError(error instanceof Error ? error.message : String(error));
@@ -406,6 +640,7 @@ export function App() {
       await refreshAgentDetail(selectedAgentId);
       await openPersonalityFile(personalityRead.fileKind);
       setPlan(null);
+      setRestorePlan(null);
       setStatus("Saved, backed up, and re-scanned");
     } catch (error) {
       setRuntimeError(error instanceof Error ? error.message : String(error));
@@ -413,24 +648,180 @@ export function App() {
     }
   }
 
-  async function restoreBackup(backupId: string) {
+  async function createRestorePlan(backupId: string) {
     if (!selectedAgentId) {
       return;
     }
     setRuntimeError(null);
-    setStatus("Restoring backup");
+    setStatus("Creating restore plan");
     try {
-      await invoke("restore_personality_backup", { backupId });
+      const result = await invoke<PersonalityRestorePlan>("create_personality_restore_plan", {
+        backupId,
+      });
+      setRestorePlan(result);
+      setPlan(null);
+      setModelPlan(null);
+      setStatus("Restore diff ready; confirm before writing");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Restore plan failed");
+    }
+  }
+
+  async function confirmRestoreBackup() {
+    if (!selectedAgentId || !restorePlan) {
+      return;
+    }
+    setRuntimeError(null);
+    setStatus("Restoring backup with safety backup");
+    try {
+      await invoke("restore_personality_backup", { backupId: restorePlan.backupId });
       await refreshIndex();
       await refreshAgentDetail(selectedAgentId);
       if (personalityRead) {
         await openPersonalityFile(personalityRead.fileKind);
       }
       setPlan(null);
+      setRestorePlan(null);
       setStatus("Backup restored and agent re-scanned");
     } catch (error) {
       setRuntimeError(error instanceof Error ? error.message : String(error));
       setStatus("Restore failed");
+    }
+  }
+
+  async function saveProviderProfileOnly() {
+    setRuntimeError(null);
+    setStatus("Saving provider profile metadata");
+    try {
+      await invoke<ProviderProfile>("save_provider_profile", {
+        input: {
+          id: providerForm.providerId,
+          name: providerForm.name || providerForm.kind,
+          kind: providerForm.kind,
+          baseUrl: providerForm.baseUrl || undefined,
+          apiKeyRef: providerForm.apiKeyRef || undefined,
+          defaultModel: providerForm.defaultModel || undefined,
+          fallbackModel: providerForm.fallbackModel || undefined,
+          validationJson: validationReport ? JSON.stringify(validationReport) : "{}",
+        },
+      });
+      await refreshProviderProfiles();
+      setStatus("Provider profile metadata saved without secret values");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Provider profile save failed");
+    }
+  }
+
+  async function generateModelProviderDiff() {
+    if (!selectedAgentId) {
+      return;
+    }
+    setRuntimeError(null);
+    setStatus("Generating provider/model diff plan");
+    try {
+      const result = await invoke<ModelProviderPlan>("create_model_provider_update_plan", {
+        request: providerUpdateFromForm(selectedAgentId, providerForm),
+      });
+      setModelPlan(result);
+      setPlan(null);
+      setRestorePlan(null);
+      setStatus("Provider/model diff ready; review target, backup, and effective model change");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Provider/model diff failed");
+    }
+  }
+
+  async function saveModelProviderUpdate() {
+    if (!selectedAgentId || !modelPlan) {
+      return;
+    }
+    setRuntimeError(null);
+    setStatus("Saving provider/model with backup and atomic write");
+    try {
+      await invoke("apply_model_provider_update", {
+        request: {
+          update: providerUpdateFromForm(selectedAgentId, providerForm),
+          expectedHash: modelPlan.oldHash,
+        },
+      });
+      await Promise.all([refreshIndex(), refreshAgentDetail(selectedAgentId), refreshProviderProfiles()]);
+      setModelPlan(null);
+      setStatus("Provider/model saved, backed up, and re-scanned");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Provider/model save failed");
+    }
+  }
+
+  async function validateProvider(includeTestRequest: boolean) {
+    setRuntimeError(null);
+    setStatus(includeTestRequest ? "Testing provider connection" : "Refreshing provider models");
+    try {
+      const report = await invoke<ProviderValidationReport>("validate_openai_provider", {
+        request: {
+          kind: providerForm.kind,
+          baseUrl: providerForm.baseUrl,
+          apiKeyRef: providerForm.apiKeyRef || undefined,
+          model: providerForm.defaultModel || providerForm.fallbackModel || undefined,
+          includeTestRequest,
+        },
+      });
+      setValidationReport(report);
+      setStatus(includeTestRequest ? "Provider test completed" : "Provider model list refreshed");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus(includeTestRequest ? "Provider test failed" : "Provider model refresh failed");
+    }
+  }
+
+  async function scanOllama() {
+    setRuntimeError(null);
+    setStatus("Scanning Ollama localhost runtime");
+    try {
+      const result = await invoke<LocalRuntimeScanResult>("scan_ollama_runtime", {
+        request: { baseUrl: providerForm.baseUrl || undefined },
+      });
+      setRuntimeScan(result);
+      setComfyScan(null);
+      setStatus("Ollama scan completed");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("Ollama scan failed");
+    }
+  }
+
+  async function scanLmStudio() {
+    setRuntimeError(null);
+    setStatus("Scanning LM Studio localhost runtime");
+    try {
+      const result = await invoke<LocalRuntimeScanResult>("scan_lmstudio_runtime", {
+        request: { baseUrl: providerForm.baseUrl || undefined },
+      });
+      setRuntimeScan(result);
+      setComfyScan(null);
+      setStatus("LM Studio scan completed");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("LM Studio scan failed");
+    }
+  }
+
+  async function scanComfy() {
+    setRuntimeError(null);
+    setStatus("Scanning ComfyUI capabilities");
+    try {
+      const result = await invoke<ComfyScanResult>("scan_comfy_runtime", {
+        request: { baseUrl: providerForm.baseUrl || undefined, customPath: comfyPath || undefined },
+      });
+      setComfyScan(result);
+      setRuntimeScan(null);
+      setStatus("ComfyUI capability scan completed");
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : String(error));
+      setStatus("ComfyUI scan failed");
     }
   }
 
@@ -467,7 +858,7 @@ export function App() {
             <p className="sectionLabel">Local Scanner</p>
             <h2>Privacy-Hardened Agent Index</h2>
           </div>
-          <div className="statusPill">Local-only / Safe writes</div>
+          <div className="statusPill">Local Only / No Cloud / No Telemetry</div>
         </header>
 
         <section className="summaryGrid" aria-label="Scan summary">
@@ -666,16 +1057,20 @@ export function App() {
               {detail ? (
                 <>
                   <div className="tabBar">
-                    {(["overview", "personality", "files", "backups"] as DetailTab[]).map((tab) => (
-                      <button
-                        className={detailTab === tab ? "tabButton tabButtonActive" : "tabButton"}
-                        key={tab}
-                        type="button"
-                        onClick={() => setDetailTab(tab)}
-                      >
-                        {tab[0].toUpperCase() + tab.slice(1)}
-                      </button>
-                    ))}
+                    {(["overview", "personality", "modelProvider", "files", "backups"] as DetailTab[]).map(
+                      (tab) => (
+                        <button
+                          className={detailTab === tab ? "tabButton tabButtonActive" : "tabButton"}
+                          key={tab}
+                          type="button"
+                          onClick={() => setDetailTab(tab)}
+                        >
+                          {tab === "modelProvider"
+                            ? "Model & Provider"
+                            : tab[0].toUpperCase() + tab.slice(1)}
+                        </button>
+                      ),
+                    )}
                   </div>
 
                   {detailTab === "overview" ? (
@@ -791,6 +1186,199 @@ export function App() {
                     </div>
                   ) : null}
 
+                  {detailTab === "modelProvider" ? (
+                    <div className="providerManager">
+                      <div className="providerGrid">
+                        <label>
+                          <span>Provider profile</span>
+                          <select
+                            value={providerForm.providerId ?? ""}
+                            onChange={(event) => {
+                              const selected = providerProfiles.find(
+                                (profile) => profile.id === event.target.value,
+                              );
+                              if (selected) {
+                                setProviderForm({
+                                  providerId: selected.id,
+                                  name: selected.name,
+                                  kind: selected.kind,
+                                  baseUrl: selected.baseUrl ?? "",
+                                  apiKeyRef: selected.apiKeyRef ?? "",
+                                  defaultModel: selected.defaultModel ?? "",
+                                  fallbackModel: selected.fallbackModel ?? "",
+                                });
+                              } else {
+                                setProviderForm((current) => ({ ...current, providerId: undefined }));
+                              }
+                              setModelPlan(null);
+                            }}
+                          >
+                            <option value="">Agent scoped metadata</option>
+                            {providerProfiles.map((profile) => (
+                              <option key={profile.id} value={profile.id}>
+                                {profile.name} / {profile.kind}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span>Name</span>
+                          <input
+                            value={providerForm.name}
+                            onChange={(event) => {
+                              setProviderForm((current) => ({
+                                ...current,
+                                name: event.target.value,
+                              }));
+                              setModelPlan(null);
+                            }}
+                          />
+                        </label>
+                        <label>
+                          <span>Kind</span>
+                          <select
+                            value={providerForm.kind}
+                            onChange={(event) => {
+                              setProviderForm((current) => ({
+                                ...current,
+                                kind: event.target.value as ProviderKind,
+                              }));
+                              setModelPlan(null);
+                            }}
+                          >
+                            {providerKinds.map((kind) => (
+                              <option key={kind} value={kind}>
+                                {kind}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span>Base URL</span>
+                          <input
+                            placeholder={
+                              providerForm.kind === "ollama"
+                                ? "http://localhost:11434"
+                                : providerForm.kind === "lmstudio"
+                                  ? "http://localhost:1234"
+                                  : "https://provider.example/v1"
+                            }
+                            value={providerForm.baseUrl}
+                            onChange={(event) => {
+                              setProviderForm((current) => ({
+                                ...current,
+                                baseUrl: event.target.value,
+                              }));
+                              setModelPlan(null);
+                            }}
+                          />
+                        </label>
+                        <label>
+                          <span>API key reference</span>
+                          <input
+                            placeholder="ENV_OR_KEYCHAIN_REF"
+                            value={providerForm.apiKeyRef}
+                            onChange={(event) => {
+                              setProviderForm((current) => ({
+                                ...current,
+                                apiKeyRef: event.target.value,
+                              }));
+                              setModelPlan(null);
+                            }}
+                          />
+                        </label>
+                        <label>
+                          <span>Default model</span>
+                          <input
+                            value={providerForm.defaultModel}
+                            onChange={(event) => {
+                              setProviderForm((current) => ({
+                                ...current,
+                                defaultModel: event.target.value,
+                              }));
+                              setModelPlan(null);
+                            }}
+                          />
+                        </label>
+                        <label>
+                          <span>Fallback model</span>
+                          <input
+                            value={providerForm.fallbackModel}
+                            onChange={(event) => {
+                              setProviderForm((current) => ({
+                                ...current,
+                                fallbackModel: event.target.value,
+                              }));
+                              setModelPlan(null);
+                            }}
+                          />
+                        </label>
+                        <label>
+                          <span>ComfyUI custom path</span>
+                          <input
+                            placeholder="~/ComfyUI"
+                            value={comfyPath}
+                            onChange={(event) => setComfyPath(event.target.value)}
+                          />
+                        </label>
+                      </div>
+
+                      <div className="providerActions">
+                        <button type="button" onClick={() => void saveProviderProfileOnly()}>
+                          Save provider profile
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!providerForm.baseUrl || providerForm.kind === "comfyui"}
+                          onClick={() => void validateProvider(false)}
+                        >
+                          Refresh models
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!providerForm.baseUrl || providerForm.kind === "comfyui"}
+                          onClick={() => void validateProvider(true)}
+                        >
+                          Test connection
+                        </button>
+                        <button type="button" onClick={() => void scanOllama()}>
+                          Scan Ollama
+                        </button>
+                        <button type="button" onClick={() => void scanLmStudio()}>
+                          Scan LM Studio
+                        </button>
+                        <button type="button" onClick={() => void scanComfy()}>
+                          Scan ComfyUI
+                        </button>
+                        <button type="button" onClick={() => void generateModelProviderDiff()}>
+                          Generate diff
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!modelPlan || !modelPlan.affectsOnlySelectedAgentProfile}
+                          onClick={() => void saveModelProviderUpdate()}
+                        >
+                          Save
+                        </button>
+                      </div>
+
+                      <EffectiveModelCard preview={effectivePreview} />
+                      <ValidationCard report={validationReport} />
+                      <RuntimeScanCard
+                        result={runtimeScan}
+                        onUseDefault={(model) => {
+                          setProviderForm((current) => ({ ...current, defaultModel: model }));
+                          setModelPlan(null);
+                        }}
+                        onUseFallback={(model) => {
+                          setProviderForm((current) => ({ ...current, fallbackModel: model }));
+                          setModelPlan(null);
+                        }}
+                      />
+                      <ComfyScanCard result={comfyScan} />
+                    </div>
+                  ) : null}
+
                   {detailTab === "files" ? (
                     <div className="emptyState">
                       File management is reserved for a later stage. This view only exposes safe
@@ -799,7 +1387,7 @@ export function App() {
                   ) : null}
 
                   {detailTab === "backups" ? (
-                    <BackupList backups={backups} onRestore={restoreBackup} />
+                    <BackupList backups={backups} onRestore={createRestorePlan} />
                   ) : null}
                 </>
               ) : (
@@ -826,7 +1414,57 @@ export function App() {
 
             <section>
               <h3>Diff</h3>
-              {plan ? (
+              {modelPlan ? (
+                <div className="diffPanel">
+                  <span>Agent/profile: {modelPlan.agentId}</span>
+                  <span>Target: {modelPlan.targetFiles.join(", ")}</span>
+                  <span>Old hash: {modelPlan.oldHash}</span>
+                  <span>New hash: {modelPlan.newHash}</span>
+                  <span>Backup: {modelPlan.backupWillBeCreated ? "will be created" : "blocked"}</span>
+                  <span>
+                    Scope:{" "}
+                    {modelPlan.affectsOnlySelectedAgentProfile
+                      ? "selected agent/profile only"
+                      : "blocked"}
+                  </span>
+                  <span>
+                    Effective model:{" "}
+                    {modelPlan.effectiveModelBefore.effectiveModel ?? "none"} -&gt;{" "}
+                    {modelPlan.effectiveModelAfter.effectiveModel ?? "none"}
+                  </span>
+                  {modelPlan.warnings.map((warning) => (
+                    <span key={warning}>{warning}</span>
+                  ))}
+                  <pre className="diffBox">
+                    {modelPlan.unifiedDiff || "No provider/model changes detected."}
+                  </pre>
+                </div>
+              ) : restorePlan ? (
+                <div className="diffPanel">
+                  <span>Restore backup: {restorePlan.backupId}</span>
+                  <span>Target: {restorePlan.targetPath}</span>
+                  <span>Backup path: {restorePlan.backupPath}</span>
+                  <span>Current hash: {restorePlan.currentHash}</span>
+                  <span>Restored hash: {restorePlan.restoredHash}</span>
+                  <span>
+                    Safety backup:{" "}
+                    {restorePlan.safetyBackupWillBeCreated ? "will be created" : "blocked"}
+                  </span>
+                  {restorePlan.warnings.map((warning) => (
+                    <span key={warning}>{warning}</span>
+                  ))}
+                  <pre className="diffBox">
+                    {restorePlan.unifiedDiff || "Restore has no text changes."}
+                  </pre>
+                  <button
+                    className="confirmRestoreButton"
+                    type="button"
+                    onClick={() => void confirmRestoreBackup()}
+                  >
+                    Confirm restore
+                  </button>
+                </div>
+              ) : plan ? (
                 <div className="diffPanel">
                   <span>Target: {plan.targetPath}</span>
                   <span>Old hash: {plan.oldHash}</span>
@@ -844,12 +1482,159 @@ export function App() {
 
             <section>
               <h3>Backups</h3>
-              <BackupList backups={backups.slice(0, 4)} onRestore={restoreBackup} compact />
+              <BackupList backups={backups.slice(0, 4)} onRestore={createRestorePlan} compact />
             </section>
           </aside>
         </div>
       </section>
     </main>
+  );
+}
+
+function EffectiveModelCard({ preview }: { preview: EffectiveModelPreview | null }) {
+  if (!preview) {
+    return <div className="emptyState">Effective model preview is not available.</div>;
+  }
+
+  return (
+    <div className="providerCard">
+      <div className="providerCardHeader">
+        <strong>Effective model</strong>
+        <span>{preview.effectiveModel ?? "none"}</span>
+      </div>
+      <p>{preview.explanation}</p>
+      <div className="providerBadgeRow">
+        <span>{preview.localOnly ? "Local-only" : "Remote-capable"}</span>
+        <span>{preview.mayCallRemoteApi ? "May call remote API" : "No remote call from preview"}</span>
+        <span>{preview.mayCreateCost ? "May create cost" : "No cost from preview"}</span>
+      </div>
+      <div className="resolutionSteps">
+        {preview.steps.map((step) => (
+          <div className={step.active ? "resolutionStep resolutionStepActive" : "resolutionStep"} key={step.label}>
+            <strong>{step.label}</strong>
+            <span>{step.model ?? "not configured"}</span>
+            <small>{step.reason}</small>
+          </div>
+        ))}
+      </div>
+      {preview.warnings.length > 0 ? (
+        <div className="warningStack">
+          {preview.warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ValidationCard({ report }: { report: ProviderValidationReport | null }) {
+  if (!report) {
+    return (
+      <div className="emptyState">
+        Provider validation only runs after Refresh models or Test connection.
+      </div>
+    );
+  }
+
+  return (
+    <div className="providerCard">
+      <div className="providerCardHeader">
+        <strong>Validation status</strong>
+        <span>{report.connectionStatus}</span>
+      </div>
+      <div className="detailStack">
+        <span>Base URL: {report.baseUrlValid ? "valid" : "invalid"}</span>
+        <span>API key reference: {report.apiKeyReferenceStatus}</span>
+        <span>Auth: {report.authStatus}</span>
+        <span>Models: {report.modelListStatus}</span>
+        <span>Generation: {report.generationStatus}</span>
+        <span>Model ids: {report.models.join(", ") || "none returned"}</span>
+        {report.warnings.map((warning) => (
+          <span key={warning}>WARNING: {warning}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RuntimeScanCard({
+  result,
+  onUseDefault,
+  onUseFallback,
+}: {
+  result: LocalRuntimeScanResult | null;
+  onUseDefault: (model: string) => void;
+  onUseFallback: (model: string) => void;
+}) {
+  if (!result) {
+    return <div className="emptyState">Local runtime scan has not been run.</div>;
+  }
+
+  return (
+    <div className="providerCard">
+      <div className="providerCardHeader">
+        <strong>{result.runtime} scan</strong>
+        <span>{result.reachable ? "reachable" : "not reachable"}</span>
+      </div>
+      <div className="detailStack">
+        <span>Endpoint: {result.endpoint ?? "not set"}</span>
+        {result.warnings.map((warning) => (
+          <span key={warning}>WARNING: {warning}</span>
+        ))}
+      </div>
+      <div className="modelList">
+        {result.models.map((model) => (
+          <div className="modelRow" key={model.name}>
+            <div>
+              <strong>{model.name}</strong>
+              <span>
+                {model.modified ?? "modified unknown"}
+                {model.size ? ` / ${model.size} bytes` : ""}
+              </span>
+            </div>
+            <button type="button" onClick={() => onUseDefault(model.name)}>
+              Default
+            </button>
+            <button type="button" onClick={() => onUseFallback(model.name)}>
+              Fallback
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ComfyScanCard({ result }: { result: ComfyScanResult | null }) {
+  if (!result) {
+    return <div className="emptyState">ComfyUI capability scan has not been run.</div>;
+  }
+
+  return (
+    <div className="providerCard">
+      <div className="providerCardHeader">
+        <strong>ComfyUI capabilities</strong>
+        <span>{result.isChatLlmProvider ? "chat provider" : "capability provider"}</span>
+      </div>
+      <div className="detailStack">
+        <span>Endpoint: {result.endpoint ?? "not set"}</span>
+        <span>Endpoint reachable: {result.endpointReachable ? "yes" : "no"}</span>
+        <span>Detected paths: {result.detectedPaths.join(", ") || "none"}</span>
+        {result.warnings.map((warning) => (
+          <span key={warning}>WARNING: {warning}</span>
+        ))}
+      </div>
+      <div className="modelList">
+        {result.capabilityFolders.map((folder) => (
+          <div className="comfyFolder" key={folder.path}>
+            <strong>{folder.kind}</strong>
+            <span>{folder.path}</span>
+            <small>{folder.models.join(", ") || "no model files detected"}</small>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

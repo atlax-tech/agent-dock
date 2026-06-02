@@ -24,7 +24,17 @@ pub fn run() {
             commands::personality::create_personality_update_plan,
             commands::personality::apply_personality_update,
             commands::personality::list_agent_backups,
-            commands::personality::restore_personality_backup
+            commands::personality::create_personality_restore_plan,
+            commands::personality::restore_personality_backup,
+            commands::providers::list_provider_profiles,
+            commands::providers::save_provider_profile,
+            commands::providers::resolve_effective_model_preview,
+            commands::providers::create_model_provider_update_plan,
+            commands::providers::apply_model_provider_update,
+            commands::providers::validate_openai_provider,
+            commands::providers::scan_ollama_runtime,
+            commands::providers::scan_lmstudio_runtime,
+            commands::providers::scan_comfy_runtime
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AgentDock desktop app");

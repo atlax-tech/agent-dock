@@ -30,6 +30,8 @@ pub enum DatabaseError {
     Sqlite(#[from] rusqlite::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("validation error: {0}")]
+    Validation(String),
 }
 
 #[derive(Debug, Serialize)]
@@ -51,6 +53,52 @@ pub struct BackupRecord {
     pub created_at: String,
     pub content_hash_before: String,
     pub content_hash_after: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProviderKind {
+    OpenAiCompatible,
+    Ollama,
+    Lmstudio,
+    Comfyui,
+    Custom,
+}
+
+impl ProviderKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProviderKind::OpenAiCompatible => "openai-compatible",
+            ProviderKind::Ollama => "ollama",
+            ProviderKind::Lmstudio => "lmstudio",
+            ProviderKind::Comfyui => "comfyui",
+            ProviderKind::Custom => "custom",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "ollama" => ProviderKind::Ollama,
+            "lmstudio" => ProviderKind::Lmstudio,
+            "comfyui" => ProviderKind::Comfyui,
+            "custom" => ProviderKind::Custom,
+            _ => ProviderKind::OpenAiCompatible,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderProfile {
+    pub id: String,
+    pub name: String,
+    pub kind: ProviderKind,
+    pub base_url: Option<String>,
+    pub api_key_ref: Option<String>,
+    pub default_model: Option<String>,
+    pub fallback_model: Option<String>,
+    pub validation_json: String,
+    pub updated_at: String,
 }
 
 pub fn initialize_database() -> Result<DatabaseReport, DatabaseError> {
@@ -498,6 +546,95 @@ pub fn load_backup_record(
         .map_err(DatabaseError::from)
 }
 
+pub fn upsert_provider_profile(
+    connection: &Connection,
+    profile: &ProviderProfile,
+) -> Result<(), DatabaseError> {
+    reject_secret_like_profile_values(profile)?;
+    connection.execute(
+        r#"
+        INSERT INTO provider_profiles
+          (id, name, kind, base_url, api_key_ref, default_model, fallback_model,
+           validation_json, updated_at)
+        VALUES
+          (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          kind = excluded.kind,
+          base_url = excluded.base_url,
+          api_key_ref = excluded.api_key_ref,
+          default_model = excluded.default_model,
+          fallback_model = excluded.fallback_model,
+          validation_json = excluded.validation_json,
+          updated_at = excluded.updated_at
+        "#,
+        params![
+            &profile.id,
+            &profile.name,
+            profile.kind.as_str(),
+            profile.base_url.as_deref(),
+            profile.api_key_ref.as_deref(),
+            profile.default_model.as_deref(),
+            profile.fallback_model.as_deref(),
+            &profile.validation_json,
+            &profile.updated_at,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn load_provider_profiles(
+    connection: &Connection,
+) -> Result<Vec<ProviderProfile>, DatabaseError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT id, name, kind, base_url, api_key_ref, default_model, fallback_model,
+               validation_json, updated_at
+        FROM provider_profiles
+        ORDER BY updated_at DESC, name
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        let kind_text: String = row.get(2)?;
+        Ok(ProviderProfile {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            kind: ProviderKind::from_str(&kind_text),
+            base_url: row.get(3)?,
+            api_key_ref: row.get(4)?,
+            default_model: row.get(5)?,
+            fallback_model: row.get(6)?,
+            validation_json: row.get(7)?,
+            updated_at: row.get(8)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from)
+}
+
+fn reject_secret_like_profile_values(profile: &ProviderProfile) -> Result<(), DatabaseError> {
+    if profile
+        .api_key_ref
+        .as_deref()
+        .map(looks_like_secret_value)
+        .unwrap_or(false)
+    {
+        return Err(DatabaseError::Validation(
+            "apiKeyRef must be a reference name, not a secret value".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn looks_like_secret_value(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.starts_with("sk-")
+        || lower.starts_with("sk_")
+        || lower.contains("bearer ")
+        || lower.contains("api_key=")
+        || lower.contains("token=")
+}
+
 fn backup_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<BackupRecord> {
     let runtime_text: String = row.get(1)?;
     Ok(BackupRecord {
@@ -621,5 +758,51 @@ mod tests {
         assert_eq!(reloaded[0].source, ScanRootSource::UserSelected);
         assert!(reloaded[0].exists);
         assert!(reloaded[0].readable);
+    }
+
+    #[test]
+    fn provider_profiles_round_trip_without_secret_values() {
+        let home = tempdir().expect("temp home");
+        let connection = open_database_in(home.path()).expect("open sqlite");
+        let profile = ProviderProfile {
+            id: "provider:test".to_string(),
+            name: "Test Provider".to_string(),
+            kind: ProviderKind::OpenAiCompatible,
+            base_url: Some("http://localhost:9999/v1".to_string()),
+            api_key_ref: Some("AGENTDOCK_TEST_KEY".to_string()),
+            default_model: Some("gpt-test".to_string()),
+            fallback_model: Some("gpt-fallback".to_string()),
+            validation_json: "{\"status\":\"ok\"}".to_string(),
+            updated_at: "1".to_string(),
+        };
+
+        upsert_provider_profile(&connection, &profile).expect("upsert provider profile");
+        let loaded = load_provider_profiles(&connection).expect("load provider profiles");
+        let rendered = serde_json::to_string(&loaded).expect("render provider profiles");
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].api_key_ref.as_deref(), Some("AGENTDOCK_TEST_KEY"));
+        assert!(!rendered.contains("sk-test"));
+    }
+
+    #[test]
+    fn provider_profiles_reject_secret_like_api_key_ref() {
+        let home = tempdir().expect("temp home");
+        let connection = open_database_in(home.path()).expect("open sqlite");
+        let profile = ProviderProfile {
+            id: "provider:test".to_string(),
+            name: "Test Provider".to_string(),
+            kind: ProviderKind::OpenAiCompatible,
+            base_url: Some("http://localhost:9999/v1".to_string()),
+            api_key_ref: Some("sk-test-secret".to_string()),
+            default_model: None,
+            fallback_model: None,
+            validation_json: "{}".to_string(),
+            updated_at: "1".to_string(),
+        };
+
+        let error = upsert_provider_profile(&connection, &profile).expect_err("secret rejected");
+
+        assert!(error.to_string().contains("apiKeyRef"));
     }
 }

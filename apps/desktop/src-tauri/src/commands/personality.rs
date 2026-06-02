@@ -131,6 +131,22 @@ pub struct PersonalityUpdateResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PersonalityRestorePlan {
+    pub backup_id: String,
+    pub agent_id: String,
+    pub runtime: AgentRuntime,
+    pub file_kind: PersonalityFileKind,
+    pub target_path: PathBuf,
+    pub backup_path: PathBuf,
+    pub current_hash: String,
+    pub restored_hash: String,
+    pub unified_diff: String,
+    pub warnings: Vec<String>,
+    pub safety_backup_will_be_created: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RestoreResult {
     pub restored_backup_id: String,
     pub safety_backup_id: String,
@@ -176,7 +192,23 @@ pub fn create_personality_update_plan(
     expected_hash: String,
 ) -> Result<PersonalityUpdatePlan, String> {
     let connection = open_database().map_err(|error| error.to_string())?;
-    let agent = find_agent(&connection, &agent_id)?;
+    create_personality_update_plan_with_connection(
+        &connection,
+        agent_id,
+        file_kind,
+        new_content,
+        expected_hash,
+    )
+}
+
+fn create_personality_update_plan_with_connection(
+    connection: &rusqlite::Connection,
+    agent_id: String,
+    file_kind: PersonalityFileKind,
+    new_content: String,
+    expected_hash: String,
+) -> Result<PersonalityUpdatePlan, String> {
+    let agent = find_agent(connection, &agent_id)?;
     let target = resolve_personality_target(&agent, file_kind)?;
     let current = read_current_file(&target)?;
     ensure_expected_hash(&current.hash, &expected_hash)?;
@@ -207,7 +239,27 @@ pub fn apply_personality_update(
     expected_hash: String,
 ) -> Result<PersonalityUpdateResult, String> {
     let connection = open_database().map_err(|error| error.to_string())?;
-    let agent = find_agent(&connection, &agent_id)?;
+    let home =
+        dirs::home_dir().ok_or_else(|| "Could not resolve the user home directory.".to_string())?;
+    apply_personality_update_with_connection(
+        &connection,
+        &home,
+        agent_id,
+        file_kind,
+        new_content,
+        expected_hash,
+    )
+}
+
+fn apply_personality_update_with_connection(
+    connection: &rusqlite::Connection,
+    home_dir: &Path,
+    agent_id: String,
+    file_kind: PersonalityFileKind,
+    new_content: String,
+    expected_hash: String,
+) -> Result<PersonalityUpdateResult, String> {
+    let agent = find_agent(connection, &agent_id)?;
     let target = resolve_personality_target(&agent, file_kind)?;
     let current = read_current_file(&target)?;
     ensure_expected_hash(&current.hash, &expected_hash)?;
@@ -218,7 +270,14 @@ pub fn apply_personality_update(
         );
     }
 
-    let backup = create_backup_record(&agent, file_kind, &target, &current.hash, &new_hash)?;
+    let backup = create_backup_record_under(
+        home_dir,
+        &agent,
+        file_kind,
+        &target,
+        &current.hash,
+        &new_hash,
+    )?;
     write_backup_payload(
         &backup.backup_path,
         file_kind,
@@ -226,9 +285,9 @@ pub fn apply_personality_update(
         &current.content,
     )?;
     atomic_write(&target, new_content.as_bytes())?;
-    insert_backup_record(&connection, &backup, "personality_update")
+    insert_backup_record(connection, &backup, "personality_update")
         .map_err(|error| error.to_string())?;
-    let scan_result = rescan_agent_root(&connection, &agent)?;
+    let scan_result = rescan_agent_root(connection, &agent)?;
 
     Ok(PersonalityUpdateResult {
         agent_id: agent.id,
@@ -250,11 +309,67 @@ pub fn list_agent_backups(agent_id: String) -> Result<Vec<BackupRecord>, String>
 }
 
 #[tauri::command]
+pub fn create_personality_restore_plan(
+    backup_id: String,
+) -> Result<PersonalityRestorePlan, String> {
+    let connection = open_database().map_err(|error| error.to_string())?;
+    create_personality_restore_plan_with_connection(&connection, backup_id)
+}
+
+#[tauri::command]
 pub fn restore_personality_backup(backup_id: String) -> Result<RestoreResult, String> {
     let connection = open_database().map_err(|error| error.to_string())?;
-    let backup = load_backup_record(&connection, &backup_id).map_err(|error| error.to_string())?;
+    let home =
+        dirs::home_dir().ok_or_else(|| "Could not resolve the user home directory.".to_string())?;
+    let _plan = create_personality_restore_plan_with_connection(&connection, backup_id.clone())?;
+    restore_personality_backup_with_connection(&connection, &home, backup_id)
+}
+
+fn create_personality_restore_plan_with_connection(
+    connection: &rusqlite::Connection,
+    backup_id: String,
+) -> Result<PersonalityRestorePlan, String> {
+    let backup = load_backup_record(connection, &backup_id).map_err(|error| error.to_string())?;
     let file_kind = PersonalityFileKind::from_backup_value(&backup.file_kind)?;
-    let agent = find_agent(&connection, &backup.agent_id)?;
+    let agent = find_agent(connection, &backup.agent_id)?;
+    let target = resolve_personality_target(&agent, file_kind)?;
+    if target != backup.original_path {
+        return Err("Backup target no longer matches the indexed agent root.".to_string());
+    }
+    let current = read_current_file(&target)?;
+    let restored_payload = read_backup_payload(&backup.backup_path, file_kind)?;
+    let restored_hash = restored_payload
+        .as_ref()
+        .map(|content| content_hash(content))
+        .unwrap_or_else(|| MISSING_HASH.to_string());
+    let restored_display = restored_payload.as_deref().unwrap_or("");
+    Ok(PersonalityRestorePlan {
+        backup_id: backup.backup_id,
+        agent_id: agent.id,
+        runtime: agent.runtime,
+        file_kind,
+        target_path: target,
+        backup_path: backup.backup_path,
+        current_hash: current.hash,
+        restored_hash,
+        unified_diff: unified_diff(file_kind.file_name(), &current.content, restored_display),
+        warnings: vec![
+            "Restore will create a safety backup before writing.".to_string(),
+            "Restore is scoped to the selected agent/profile personality file.".to_string(),
+            "AgentDock will re-scan the agent/profile root after restore.".to_string(),
+        ],
+        safety_backup_will_be_created: true,
+    })
+}
+
+fn restore_personality_backup_with_connection(
+    connection: &rusqlite::Connection,
+    home_dir: &Path,
+    backup_id: String,
+) -> Result<RestoreResult, String> {
+    let backup = load_backup_record(connection, &backup_id).map_err(|error| error.to_string())?;
+    let file_kind = PersonalityFileKind::from_backup_value(&backup.file_kind)?;
+    let agent = find_agent(connection, &backup.agent_id)?;
     let target = resolve_personality_target(&agent, file_kind)?;
     if target != backup.original_path {
         return Err("Backup target no longer matches the indexed agent root.".to_string());
@@ -267,8 +382,14 @@ pub fn restore_personality_backup(backup_id: String) -> Result<RestoreResult, St
         .map(|content| content_hash(content))
         .unwrap_or_else(|| MISSING_HASH.to_string());
 
-    let safety_backup =
-        create_backup_record(&agent, file_kind, &target, &current.hash, &restored_hash)?;
+    let safety_backup = create_backup_record_under(
+        home_dir,
+        &agent,
+        file_kind,
+        &target,
+        &current.hash,
+        &restored_hash,
+    )?;
     write_backup_payload(
         &safety_backup.backup_path,
         file_kind,
@@ -282,9 +403,9 @@ pub fn restore_personality_backup(backup_id: String) -> Result<RestoreResult, St
         fs::remove_file(&target).map_err(|error| error.to_string())?;
     }
 
-    insert_backup_record(&connection, &safety_backup, "personality_restore")
+    insert_backup_record(connection, &safety_backup, "personality_restore")
         .map_err(|error| error.to_string())?;
-    let scan_result = rescan_agent_root(&connection, &agent)?;
+    let scan_result = rescan_agent_root(connection, &agent)?;
 
     Ok(RestoreResult {
         restored_backup_id: backup.backup_id,
@@ -449,7 +570,21 @@ fn plan_warnings(new_content: &str) -> Vec<String> {
     warnings
 }
 
+#[cfg(test)]
 fn create_backup_record(
+    agent: &AgentScanRecord,
+    file_kind: PersonalityFileKind,
+    target: &Path,
+    before_hash: &str,
+    after_hash: &str,
+) -> Result<BackupRecord, String> {
+    let home_dir =
+        dirs::home_dir().ok_or_else(|| "Could not resolve the user home directory.".to_string())?;
+    create_backup_record_under(&home_dir, agent, file_kind, target, before_hash, after_hash)
+}
+
+fn create_backup_record_under(
+    home_dir: &Path,
     agent: &AgentScanRecord,
     file_kind: PersonalityFileKind,
     target: &Path,
@@ -465,8 +600,7 @@ fn create_backup_record(
         created_at,
         file_kind.as_str()
     );
-    let backup_path = dirs::home_dir()
-        .ok_or_else(|| "Could not resolve the user home directory.".to_string())?
+    let backup_path = home_dir
         .join(".agentdock")
         .join("backups")
         .join(agent.runtime.as_str())
@@ -691,5 +825,83 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].file_kind, "user");
         assert_eq!(loaded[0].original_path, target);
+    }
+
+    #[test]
+    fn personality_apply_and_restore_closed_loop() {
+        let home = tempdir().expect("home");
+        let connection = open_database_in(home.path()).expect("db");
+        let agent_root = home.path().join(".openclaw/agents/agentdock-phase3-test");
+        fs::create_dir_all(&agent_root).expect("agent root");
+        let soul_path = agent_root.join("SOUL.md");
+        let original = "Original isolated personality.\n";
+        let updated = "Updated isolated personality.\n";
+        fs::write(&soul_path, original).expect("write original");
+        let agent = test_agent(&agent_root);
+        upsert_agent_records(&connection, &[agent.clone()]).expect("agent insert");
+
+        let read = read_current_file(&soul_path).expect("read personality");
+        let update_plan = create_personality_update_plan_with_connection(
+            &connection,
+            agent.id.clone(),
+            PersonalityFileKind::Soul,
+            updated.to_string(),
+            read.hash,
+        )
+        .expect("update plan");
+
+        let update_result = apply_personality_update_with_connection(
+            &connection,
+            home.path(),
+            agent.id.clone(),
+            PersonalityFileKind::Soul,
+            updated.to_string(),
+            update_plan.old_hash,
+        )
+        .expect("apply update");
+
+        assert_eq!(
+            fs::read_to_string(&soul_path).expect("updated content"),
+            updated
+        );
+        assert!(update_result.backup_path.join("SOUL.md").exists());
+
+        let restore_plan = create_personality_restore_plan_with_connection(
+            &connection,
+            update_result
+                .backup_path
+                .parent()
+                .and_then(|_| db_load_agent_backups(&connection, &agent.id).ok())
+                .and_then(|backups| {
+                    backups
+                        .into_iter()
+                        .find(|backup| backup.file_kind == "soul")
+                })
+                .expect("update backup")
+                .backup_id,
+        )
+        .expect("restore plan");
+
+        assert!(restore_plan
+            .unified_diff
+            .contains("Original isolated personality"));
+        let restore_result = restore_personality_backup_with_connection(
+            &connection,
+            home.path(),
+            restore_plan.backup_id,
+        )
+        .expect("restore");
+
+        assert_eq!(
+            fs::read_to_string(&soul_path).expect("restored content"),
+            original
+        );
+        let safety_backup = db_load_agent_backups(&connection, &agent.id)
+            .expect("load backups")
+            .into_iter()
+            .find(|backup| backup.backup_id == restore_result.safety_backup_id)
+            .expect("safety backup record");
+        assert!(safety_backup.backup_path.join("SOUL.md").exists());
+        assert!(!restore_result.scan_result.is_empty());
     }
 }

@@ -439,7 +439,10 @@ button:disabled {
 .tabButton,
 .fileButton,
 .editorActions button,
-.backupRow button {
+.backupRow button,
+.providerActions button,
+.modelRow button,
+.confirmRestoreButton {
   min-height: 34px;
   border: 1px solid #cfd8d3;
   border-radius: 7px;
@@ -475,6 +478,168 @@ button:disabled {
 .personalityEditor {
   display: grid;
   gap: 14px;
+}
+
+.providerManager {
+  display: grid;
+  gap: 14px;
+}
+
+.providerGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.providerGrid label {
+  display: grid;
+  gap: 6px;
+  color: #43514d;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.providerGrid input,
+.providerGrid select {
+  min-height: 38px;
+  width: 100%;
+  padding: 0 10px;
+  border: 1px solid #cfd8d3;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #21302c;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.providerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.providerActions button,
+.modelRow button,
+.confirmRestoreButton {
+  padding: 0 12px;
+}
+
+.providerActions button:last-child,
+.confirmRestoreButton {
+  border-color: #173f35;
+  background: #173f35;
+  color: #ffffff;
+}
+
+.providerCard {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e0e5df;
+  border-radius: 8px;
+  background: #fafbf8;
+}
+
+.providerCard p {
+  margin: 0;
+  color: #3d4e49;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.providerCardHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #172522;
+  font-size: 13px;
+}
+
+.providerCardHeader span {
+  overflow-wrap: anywhere;
+  color: #1d6652;
+  font-weight: 800;
+  text-align: right;
+}
+
+.providerBadgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.providerBadgeRow span {
+  padding: 5px 7px;
+  border-radius: 999px;
+  background: #e8f2ee;
+  color: #1d6652;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.resolutionSteps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.resolutionStep,
+.comfyFolder {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e1e6e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #3d4e49;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.resolutionStepActive {
+  border-color: #7dad9d;
+  background: #eff8f4;
+}
+
+.resolutionStep strong,
+.modelRow strong,
+.comfyFolder strong {
+  color: #172522;
+  font-size: 13px;
+}
+
+.resolutionStep small,
+.modelRow span,
+.comfyFolder small,
+.comfyFolder span {
+  color: #61706b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.modelList {
+  display: grid;
+  gap: 8px;
+}
+
+.modelRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #e1e6e1;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.modelRow div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .fileSelector {

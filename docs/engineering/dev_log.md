@@ -429,3 +429,132 @@ the whitelisted personality files: `SOUL.md`, `AGENTS.md`, and `USER.md`.
 Phase 2.5 can proceed toward Phase 3 after desktop runtime manual review in the
 Tauri app. Provider/model/skill/channel/migration work remains intentionally
 out of scope for this phase.
+
+## 2026-06-02 - Phase 3 Provider and Model Manager
+
+### Phase
+
+Phase 3 - Provider and Model Manager, plus Phase 2.5 carry-over restore
+hardening.
+
+### Implemented
+
+- Added `Model & Provider` tab inside Agent Detail.
+- Added provider profile metadata round trip in SQLite for name, kind, base
+  URL, API key reference, default model, fallback model, validation JSON, and
+  updated time.
+- Added effective model preview with resolution order, source explanation,
+  local/remote/cost indicators, and remote fallback warning.
+- Added explicit OpenAI-compatible validation command with base URL checks,
+  API key reference existence check, model listing, optional lightweight
+  generation test, and unknown model warning.
+- Added explicit Ollama scanner for `/api/tags`.
+- Added explicit LM Studio scanner for `/v1/models`.
+- Added explicit ComfyUI capability scanner for default/custom paths and model
+  folders: checkpoints, vae, loras, controlnet, upscale_models, and embeddings.
+- Added provider/model safe mutation commands:
+  `create_model_provider_update_plan` and `apply_model_provider_update`.
+- Provider/model apply validates stale hash, creates backup, writes
+  atomically, re-scans the selected agent/profile root, and refreshes SQLite
+  index/provider profile metadata.
+- Added `create_personality_restore_plan` with target path, backup path,
+  current/restored hashes, unified diff, warnings, and safety backup preview.
+- Frontend Restore now creates a restore plan first and requires explicit
+  Confirm restore before write.
+- Top status now shows `Local Only / No Cloud / No Telemetry`.
+
+### Modified Files
+
+- `apps/desktop/src-tauri/Cargo.toml`
+- `apps/desktop/src-tauri/Cargo.lock`
+- `apps/desktop/src-tauri/src/commands/mod.rs`
+- `apps/desktop/src-tauri/src/commands/personality.rs`
+- `apps/desktop/src-tauri/src/commands/providers.rs`
+- `apps/desktop/src-tauri/src/db/mod.rs`
+- `apps/desktop/src-tauri/src/lib.rs`
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Privacy Boundary
+
+- No API key value, bot token value, OAuth token, pairing state, session,
+  memory, transcript, log, or `.env` value is read, displayed, or saved.
+- Provider profile DB writes reject secret-like `apiKeyRef` values and store
+  only reference names.
+- Provider/model mutation is scoped to the selected indexed agent/profile
+  config file inside the agent/profile root.
+- Global/default config and other agents/profiles are not modified.
+- Real Hermes/OpenClaw paths were not written or used for tests.
+
+### Provider Validation Boundary
+
+- Provider validation is only invoked by explicit UI buttons:
+  Refresh models or Test connection.
+- Validation does not run on app launch.
+- Validation never logs or stores secret values.
+- API key reference checks use the reference name only; AgentDock does not
+  read `.env` files or display secret contents.
+
+### Local Runtime Scan Boundary
+
+- Ollama, LM Studio, and ComfyUI scans are only invoked by explicit UI buttons.
+- Ollama/LM Studio scanner endpoints are restricted to localhost/loopback.
+- ComfyUI scan reads only configured/default ComfyUI model capability folders
+  and does not execute workflows or upload files.
+- No local runtime server is started and no model is downloaded.
+
+### Test Results
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test`: passed with 35 tests.
+- `cargo check`: passed.
+- `git diff --check`: passed.
+- Privacy/network audit passed with no hits:
+  `! rg -n "fetch\\(|XMLHttpRequest|sendBeacon|WebSocket" apps/desktop/src apps/desktop/src-tauri/src`.
+- Browser static smoke at `http://127.0.0.1:1420/` passed for page identity,
+  nonblank first viewport, top status text, no framework overlay, and no
+  console warning/error. Browser-only Vite cannot exercise Tauri commands or
+  Agent Detail tabs because the Tauri command bridge is unavailable there.
+
+### Backend Tests Added
+
+- Provider profile DB round trip.
+- Provider profile secret-like `apiKeyRef` rejection.
+- OpenAI-compatible validation mock server.
+- Ollama `/api/tags` mock server.
+- LM Studio `/v1/models` mock server.
+- ComfyUI folder scan fixture.
+- Effective model resolution.
+- Provider/model update plan diff and scoped target.
+- Provider/model apply creates backup.
+- Provider/model apply rejects stale hash.
+- Provider/model update rejects secret-like values.
+- Personality apply + restore closed loop with restore plan and safety backup.
+
+### Real Hermes/OpenClaw Touch Status
+
+- Real `~/.hermes`, `~/.openclaw`, workspace, provider config, channel config,
+  global config, tokens, pairing state, sessions, memory, logs, and transcript
+  paths were not touched.
+- No real test agent/profile was created.
+
+### Known Risks
+
+- Frontend still has no dedicated automated Tauri UI test framework; command
+  behavior is covered by Rust tests and rendered browser smoke is static.
+- Provider/model config mutation supports structured JSON/YAML/TOML top-level
+  provider/model fields. Unknown schemas are rejected instead of guessed.
+- OpenAI-compatible validation cannot send real auth without reading a secret;
+  authenticated providers may report auth failure until the runtime itself
+  handles credentials outside AgentDock.
+- ComfyUI is represented as a capability provider and remains blocked as a
+  default chat model unless a compatible bridge endpoint is configured later.
+
+### Next Phase Recommendation
+
+- Add native folder picker support and a desktop-runtime UI test harness for
+  Agent Detail interactions.
+- Broaden real-world OpenClaw/Hermes provider schema fixtures before migration
+  or skill/channel mutation phases.
