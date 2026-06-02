@@ -1,0 +1,15 @@
+name: Hermes Provider Matrix
+provider: openrouter
+base_url: https://openrouter.ai/api/v1
+default_model: openrouter/auto
+fallback_model: qwen/qwen3-coder
+model_candidates:
+  - openrouter/auto
+  - anthropic/claude-3-5-sonnet
+channels:
+  feishu:
+    accountId: fixture-account-id
+    botId: fixture-bot-id
+    appId: fixture-app-id
+    secret: fixture-secret
+encrypted_credentials: fixture-encrypted-placeholder

@@ -247,7 +247,7 @@ button {
 
 .rootRow {
   display: grid;
-  grid-template-columns: 92px minmax(0, 1fr) 80px;
+  grid-template-columns: 92px minmax(0, 1fr) 220px;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -270,6 +270,23 @@ button {
   text-align: right;
 }
 
+.previewBox {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid #c9d8d1;
+  border-radius: 8px;
+  background: #f5faf7;
+  color: #344640;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.previewBox strong {
+  color: #172522;
+}
+
 .emptyState {
   padding: 18px;
   border: 1px dashed #cbd6d1;
@@ -288,7 +305,9 @@ button {
 .agentHeader,
 .agentRow {
   display: grid;
-  grid-template-columns: 180px 90px minmax(160px, 1fr) minmax(260px, 1.25fr) minmax(180px, 0.8fr);
+  grid-template-columns:
+    180px 80px 90px minmax(160px, 1fr) minmax(260px, 1.25fr)
+    minmax(180px, 0.8fr);
   gap: 12px;
   align-items: start;
 }
@@ -323,6 +342,33 @@ button {
   font-size: 12px;
 }
 
+.linkButton {
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1d6652;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.statusText {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.statusText-ok {
+  color: #1d6652;
+}
+
+.statusText-warning {
+  color: #91620d;
+}
+
+.statusText-error {
+  color: #9b2f2f;
+}
+
 .metadataStack,
 .warningStack {
   display: grid;
@@ -334,6 +380,17 @@ button {
   border-radius: 6px;
   background: #eef4f0;
   color: #355247;
+}
+
+.agentDetails {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 12px;
+  border-top: 1px solid #dfe7e2;
+  color: #3d4e49;
+  overflow-wrap: anywhere;
 }
 
 .errorBox {

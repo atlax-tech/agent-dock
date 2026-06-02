@@ -1,0 +1,8 @@
+{
+  "name": "Hermes Model Without Provider",
+  "profile": {
+    "name": "Hermes Model Without Provider"
+  },
+  "default_model": "gpt-4.1-mini",
+  "fallback_model": "gpt-4.1-nano"
+}

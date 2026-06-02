@@ -108,6 +108,46 @@ pub fn scan_selected_root(
     }
 }
 
+pub fn preview_scan_root(runtime: AgentRuntime, path: PathBuf) -> ScanPreview {
+    let exists = path.is_dir();
+    let readable = exists && fs::read_dir(&path).is_ok();
+    let mut warnings = Vec::new();
+    if exists && !readable {
+        warnings.push(warning(
+            "root_not_readable",
+            "Scan root is not readable",
+            WarningSeverity::Error,
+        ));
+    }
+    if !exists {
+        warnings.push(warning(
+            "root_not_found",
+            "Target path does not exist",
+            WarningSeverity::Warning,
+        ));
+    }
+
+    ScanPreview {
+        runtime,
+        path,
+        exists,
+        readable,
+        estimated_scan_mode: "Read-only metadata scan".to_string(),
+        private_dirs_skipped: ignore::private_runtime_dir_names()
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect(),
+        config_extensions: ["json", "yaml", "yml", "toml"]
+            .iter()
+            .map(|extension| (*extension).to_string())
+            .collect(),
+        will_read_config_metadata: readable,
+        will_skip_runtime_private_data: true,
+        will_not_store_secret_values: true,
+        warnings,
+    }
+}
+
 pub fn scan_fixtures() -> Result<Vec<AgentScanRecord>, ScannerError> {
     let mut records = Vec::new();
     for root in fixture_roots() {
@@ -144,6 +184,23 @@ pub(crate) fn warning(code: &str, message: &str, severity: WarningSeverity) -> S
         message: message.to_string(),
         severity,
     }
+}
+
+pub(crate) fn health_status(
+    provider_summary: &ProviderSummary,
+    model_summary: &ModelSummary,
+    warnings: &[ScanWarning],
+) -> HealthStatus {
+    if warnings
+        .iter()
+        .any(|warning| warning.severity == WarningSeverity::Error)
+    {
+        return HealthStatus::Error;
+    }
+    if provider_summary.provider.is_some() && model_summary.default_model.is_some() {
+        return HealthStatus::Ok;
+    }
+    HealthStatus::Warning
 }
 
 pub(crate) fn parse_config(path: &Path) -> Option<Value> {
@@ -256,6 +313,15 @@ mod tests {
             .any(|record| record.name == "Auto Business Agent"));
         assert!(records
             .iter()
+            .any(|record| record.name == "Provider Without Model"));
+        assert!(records
+            .iter()
+            .any(|record| record.name == "Model Without Provider"));
+        assert!(records
+            .iter()
+            .any(|record| record.name == "OpenClaw Channel Matrix"));
+        assert!(records
+            .iter()
             .all(|record| record.runtime == AgentRuntime::OpenClaw));
     }
 
@@ -270,6 +336,12 @@ mod tests {
         assert!(records
             .iter()
             .any(|record| record.name == "Hermes Dev Agent"));
+        assert!(records
+            .iter()
+            .any(|record| record.name == "Hermes Provider Matrix"));
+        assert!(records
+            .iter()
+            .any(|record| record.name == "Hermes Model Without Provider"));
         assert!(records
             .iter()
             .all(|record| record.runtime == AgentRuntime::Hermes));
@@ -296,7 +368,70 @@ mod tests {
 
         assert!(rendered.contains("Skipped private runtime data"));
         assert!(!rendered.contains("This private session content must never be indexed"));
+        assert!(!rendered.contains("This private memory content must never be indexed"));
+        assert!(!rendered.contains("This private history content must never be indexed"));
+        assert!(!rendered.contains("This private log content must never be indexed"));
         assert!(!rendered.contains("transcript"));
+    }
+
+    #[test]
+    fn scanner_never_serializes_secret_values() {
+        let records = scan_fixtures().expect("fixture scan");
+        let rendered = serde_json::to_string(&records).expect("records json");
+
+        for secret_value in [
+            "fixture-openclaw-api-key",
+            "fixture-openclaw-bot-token",
+            "fixture-telegram-token",
+            "fixture-app-secret",
+            "fixture-hermes-api-key",
+            "fixture-hermes-bot-token",
+            "fixture-secret",
+            "fixture-encrypted-placeholder",
+        ] {
+            assert!(
+                !rendered.contains(secret_value),
+                "serialized records leaked {secret_value}"
+            );
+        }
+    }
+
+    #[test]
+    fn fixture_matrix_emits_phase_two_warnings_and_health() {
+        let records = scan_fixtures().expect("fixture scan");
+        let rendered = serde_json::to_string(&records).expect("records json");
+
+        for code in [
+            "provider_without_model",
+            "model_without_provider",
+            "channel_token_hidden",
+            "encrypted_credential_detected",
+            "possible_channel_identity_conflict",
+            "private_runtime_data_skipped",
+        ] {
+            assert!(rendered.contains(code), "missing warning code {code}");
+        }
+        assert!(records
+            .iter()
+            .any(|record| record.health_status == HealthStatus::Ok));
+        assert!(records
+            .iter()
+            .any(|record| record.health_status == HealthStatus::Warning));
+    }
+
+    #[test]
+    fn preview_scan_root_only_reports_rules_and_access() {
+        let root = repository_root().join("tests/fixtures/openclaw");
+        let preview = preview_scan_root(AgentRuntime::OpenClaw, root);
+
+        assert!(preview.exists);
+        assert!(preview.readable);
+        assert!(preview.will_skip_runtime_private_data);
+        assert!(preview.will_not_store_secret_values);
+        assert_eq!(preview.config_extensions, ["json", "yaml", "yml", "toml"]);
+        assert!(preview
+            .private_dirs_skipped
+            .contains(&"sessions".to_string()));
     }
 
     #[test]

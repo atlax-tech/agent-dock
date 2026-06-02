@@ -7,8 +7,8 @@ use super::ignore::is_private_runtime_dir;
 use super::redaction::collect_secret_fields;
 use super::types::*;
 use super::{
-    collect_config_files, find_personality_files, find_skill_paths, now_timestamp, parse_config,
-    warning, ScannerError,
+    collect_config_files, find_personality_files, find_skill_paths, health_status, now_timestamp,
+    parse_config, warning, ScannerError,
 };
 
 pub fn scan_root(root: &Path) -> Result<Vec<AgentScanRecord>, ScannerError> {
@@ -97,6 +97,14 @@ fn scan_profile_dir(root: &Path) -> Option<AgentScanRecord> {
         ));
     }
 
+    if provider_summary.provider.is_none() && model_summary.default_model.is_some() {
+        warnings.push(warning(
+            "model_without_provider",
+            "Model configured but no provider detected",
+            WarningSeverity::Warning,
+        ));
+    }
+
     if !channel_summary.channel_hints.is_empty() && !channel_summary.token_fields.is_empty() {
         warnings.push(warning(
             "channel_token_hidden",
@@ -105,7 +113,33 @@ fn scan_profile_dir(root: &Path) -> Option<AgentScanRecord> {
         ));
     }
 
+    if provider_summary
+        .secret_fields
+        .iter()
+        .any(|field| field.to_ascii_lowercase().contains("encrypted"))
+    {
+        warnings.push(warning(
+            "encrypted_credential_detected",
+            "Encrypted credential detected; AgentDock will not migrate or decrypt it",
+            WarningSeverity::Info,
+        ));
+    }
+
+    if channel_summary.token_fields.iter().any(|field| {
+        matches!(
+            field.to_ascii_lowercase().as_str(),
+            "accountid" | "account_id" | "botid" | "bot_id" | "appid" | "app_id" | "secret"
+        )
+    }) {
+        warnings.push(warning(
+            "possible_channel_identity_conflict",
+            "Channel identity fields may be ambiguous",
+            WarningSeverity::Warning,
+        ));
+    }
+
     let last_scanned_at = now_timestamp();
+    let health_status = health_status(&provider_summary, &model_summary, &warnings);
     Some(AgentScanRecord {
         id: format!("hermes:{}", root.display()),
         runtime: AgentRuntime::Hermes,
@@ -118,6 +152,7 @@ fn scan_profile_dir(root: &Path) -> Option<AgentScanRecord> {
         model_summary,
         channel_summary,
         warnings,
+        health_status,
         last_scanned_at,
     })
 }
@@ -175,6 +210,9 @@ fn string_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
 fn collect_channel_hints(value: &Value, summary: &mut ChannelSummary) {
     if let Some(channels) = value.get("channels").and_then(Value::as_object) {
         summary.channel_hints.extend(channels.keys().cloned());
+        for channel in channels.values() {
+            collect_channel_token_fields(channel, summary);
+        }
     }
     for secret in collect_secret_fields(value) {
         if secret.to_ascii_lowercase().contains("token") {
@@ -185,4 +223,22 @@ fn collect_channel_hints(value: &Value, summary: &mut ChannelSummary) {
     summary.channel_hints.dedup();
     summary.token_fields.sort();
     summary.token_fields.dedup();
+}
+
+fn collect_channel_token_fields(value: &Value, summary: &mut ChannelSummary) {
+    let Some(object) = value.as_object() else {
+        return;
+    };
+    for key in object.keys() {
+        let normalized = key.to_ascii_lowercase();
+        if normalized.contains("token")
+            || normalized.contains("secret")
+            || matches!(
+                normalized.as_str(),
+                "accountid" | "account_id" | "botid" | "bot_id" | "appid" | "app_id"
+            )
+        {
+            summary.token_fields.push(key.to_string());
+        }
+    }
 }

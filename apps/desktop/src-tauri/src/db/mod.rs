@@ -1,11 +1,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::scanner::types::{AgentRuntime, AgentScanRecord, ScanRoot};
+use crate::scanner::types::{
+    AgentRuntime, AgentScanRecord, HealthStatus, ScanRoot, ScanRootSource,
+};
 
 const DATABASE_FILE: &str = "agentdock.sqlite";
 
@@ -202,6 +204,12 @@ fn migrate_phase_one_columns(connection: &Connection) -> Result<(), DatabaseErro
         "channel_summary_json",
         "TEXT NOT NULL DEFAULT '{}'",
     )?;
+    add_column_if_missing(
+        connection,
+        "agent_index",
+        "health_status",
+        "TEXT NOT NULL DEFAULT 'warning'",
+    )?;
     Ok(())
 }
 
@@ -283,10 +291,10 @@ pub fn upsert_agent_records(
                env_path, soul_path, agents_path, user_path, memory_path, sessions_path,
                detected_provider, default_model, fallback_model, status, warnings_json,
                last_scanned_at, config_paths_json, personality_files_json, skill_paths_json,
-               provider_summary_json, model_summary_json, channel_summary_json)
+               provider_summary_json, model_summary_json, channel_summary_json, health_status)
             VALUES
               (?1, ?2, ?3, ?4, NULL, NULL, ?5, NULL, NULL, NULL, NULL, NULL, NULL,
-               ?6, ?7, ?8, 'indexed', ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+               ?6, ?7, ?8, 'indexed', ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
             ON CONFLICT(id) DO UPDATE SET
               runtime = excluded.runtime,
               display_name = excluded.display_name,
@@ -303,9 +311,10 @@ pub fn upsert_agent_records(
               skill_paths_json = excluded.skill_paths_json,
               provider_summary_json = excluded.provider_summary_json,
               model_summary_json = excluded.model_summary_json,
-              channel_summary_json = excluded.channel_summary_json
+              channel_summary_json = excluded.channel_summary_json,
+              health_status = excluded.health_status
             "#,
-            (
+            params![
                 &record.id,
                 record.runtime.as_str(),
                 &record.name,
@@ -322,7 +331,8 @@ pub fn upsert_agent_records(
                 serde_json::to_string(&record.provider_summary)?,
                 serde_json::to_string(&record.model_summary)?,
                 serde_json::to_string(&record.channel_summary)?,
-            ),
+                health_status_text(record.health_status),
+            ],
         )?;
     }
     Ok(())
@@ -333,7 +343,7 @@ pub fn load_agent_records(connection: &Connection) -> Result<Vec<AgentScanRecord
         r#"
         SELECT id, runtime, display_name, root_path, config_paths_json, personality_files_json,
                skill_paths_json, provider_summary_json, model_summary_json, channel_summary_json,
-               warnings_json, last_scanned_at
+               warnings_json, health_status, last_scanned_at
         FROM agent_index
         ORDER BY runtime, display_name
         "#,
@@ -357,7 +367,35 @@ pub fn load_agent_records(connection: &Connection) -> Result<Vec<AgentScanRecord
             model_summary: serde_json::from_str(&row.get::<_, String>(8)?).unwrap_or_default(),
             channel_summary: serde_json::from_str(&row.get::<_, String>(9)?).unwrap_or_default(),
             warnings: serde_json::from_str(&row.get::<_, String>(10)?).unwrap_or_default(),
-            last_scanned_at: row.get(11)?,
+            health_status: parse_health_status(&row.get::<_, String>(11)?),
+            last_scanned_at: row.get(12)?,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from)
+}
+
+pub fn load_scan_roots(connection: &Connection) -> Result<Vec<ScanRoot>, DatabaseError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT runtime, path, source, "exists", readable, last_scanned_at
+        FROM scanned_roots
+        WHERE enabled = 1
+        ORDER BY runtime, path
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        let runtime_text: String = row.get(0)?;
+        let runtime = parse_runtime(&runtime_text);
+        let source_text: String = row.get(2)?;
+        Ok(ScanRoot {
+            runtime,
+            path: PathBuf::from(row.get::<_, String>(1)?),
+            source: parse_scan_root_source(&source_text),
+            exists: row.get::<_, i64>(3)? == 1,
+            readable: row.get::<_, i64>(4)? == 1,
+            last_scanned_at: row.get(5)?,
         })
     })?;
 
@@ -371,6 +409,38 @@ fn json_paths(value: String) -> Vec<PathBuf> {
         .into_iter()
         .map(PathBuf::from)
         .collect()
+}
+
+fn parse_runtime(value: &str) -> AgentRuntime {
+    if value == AgentRuntime::Hermes.as_str() {
+        AgentRuntime::Hermes
+    } else {
+        AgentRuntime::OpenClaw
+    }
+}
+
+fn parse_scan_root_source(value: &str) -> ScanRootSource {
+    serde_json::from_str(value).unwrap_or_else(|_| match value {
+        "fixture" => ScanRootSource::Fixture,
+        "userSelected" => ScanRootSource::UserSelected,
+        _ => ScanRootSource::DefaultCandidate,
+    })
+}
+
+fn health_status_text(value: HealthStatus) -> &'static str {
+    match value {
+        HealthStatus::Ok => "ok",
+        HealthStatus::Warning => "warning",
+        HealthStatus::Error => "error",
+    }
+}
+
+fn parse_health_status(value: &str) -> HealthStatus {
+    match value {
+        "ok" => HealthStatus::Ok,
+        "error" => HealthStatus::Error,
+        _ => HealthStatus::Warning,
+    }
 }
 
 fn bool_as_i64(value: bool) -> i64 {
@@ -392,6 +462,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+    use crate::scanner::scan_root;
+    use crate::scanner::types::ScanRootSource;
 
     #[test]
     fn initializes_sqlite_database_under_agentdock_home() {
@@ -416,5 +488,28 @@ mod tests {
                 .expect("table exists query");
             assert_eq!(count, 1, "missing table {table}");
         }
+    }
+
+    #[test]
+    fn persists_and_reloads_scan_roots_without_duplicates() {
+        let home = tempdir().expect("temp home");
+        let connection = open_database_in(home.path()).expect("open sqlite");
+        let selected_path = home.path().join("agentdock-fixture-openclaw");
+        fs::create_dir_all(&selected_path).expect("create selected root");
+        let root = scan_root(
+            AgentRuntime::OpenClaw,
+            selected_path.clone(),
+            ScanRootSource::UserSelected,
+        );
+
+        upsert_scan_roots(&connection, &[root.clone(), root]).expect("upsert roots");
+        let reloaded = load_scan_roots(&connection).expect("load roots");
+
+        assert_eq!(reloaded.len(), 1);
+        assert_eq!(reloaded[0].runtime, AgentRuntime::OpenClaw);
+        assert_eq!(reloaded[0].path, selected_path);
+        assert_eq!(reloaded[0].source, ScanRootSource::UserSelected);
+        assert!(reloaded[0].exists);
+        assert!(reloaded[0].readable);
     }
 }

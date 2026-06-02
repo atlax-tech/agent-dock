@@ -37,6 +37,38 @@ pub struct ScanRoot {
     pub last_scanned_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InitialScanState {
+    pub scan_roots: Vec<ScanRoot>,
+    pub agents: Vec<AgentScanRecord>,
+    pub privacy_mode: PrivacyModeStatus,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivacyModeStatus {
+    pub local_only: bool,
+    pub read_only: bool,
+    pub default_candidates_inspected: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanPreview {
+    pub runtime: AgentRuntime,
+    pub path: PathBuf,
+    pub exists: bool,
+    pub readable: bool,
+    pub estimated_scan_mode: String,
+    pub private_dirs_skipped: Vec<String>,
+    pub config_extensions: Vec<String>,
+    pub will_read_config_metadata: bool,
+    pub will_skip_runtime_private_data: bool,
+    pub will_not_store_secret_values: bool,
+    pub warnings: Vec<ScanWarning>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderSummary {
@@ -58,6 +90,14 @@ pub struct ModelSummary {
 pub struct ChannelSummary {
     pub channel_hints: Vec<String>,
     pub token_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HealthStatus {
+    Ok,
+    Warning,
+    Error,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
@@ -90,5 +130,6 @@ pub struct AgentScanRecord {
     pub model_summary: ModelSummary,
     pub channel_summary: ChannelSummary,
     pub warnings: Vec<ScanWarning>,
+    pub health_status: HealthStatus,
     pub last_scanned_at: String,
 }
