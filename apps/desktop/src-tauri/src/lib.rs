@@ -18,7 +18,13 @@ pub fn run() {
             commands::scanner::scan_fixture_roots,
             commands::scanner::scan_selected_root,
             commands::scanner::scan_default_candidates,
-            commands::scanner::get_agent_index
+            commands::scanner::get_agent_index,
+            commands::personality::get_agent_detail,
+            commands::personality::read_personality_file,
+            commands::personality::create_personality_update_plan,
+            commands::personality::apply_personality_update,
+            commands::personality::list_agent_backups,
+            commands::personality::restore_personality_backup
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AgentDock desktop app");

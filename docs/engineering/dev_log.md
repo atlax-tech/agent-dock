@@ -338,3 +338,94 @@ folder scan, and restart/persisted root reload.
 
 - Add native folder picker support and broaden real-world config fixtures before
   Phase 2 mutation workflows.
+
+## 2026-06-02 - Phase 2.5 Safe Agent Detail + Personality Editor
+
+### Phase
+
+Phase 2.5 - Safe Agent Detail and Personality Editor.
+
+### Goal
+
+Add a safe, local-only agent detail workflow for reading, editing, diffing,
+backing up, atomically saving, re-scanning, listing backups, and restoring only
+the whitelisted personality files: `SOUL.md`, `AGENTS.md`, and `USER.md`.
+
+### Modified Files
+
+- `apps/desktop/src-tauri/Cargo.toml`
+- `apps/desktop/src-tauri/Cargo.lock`
+- `apps/desktop/src-tauri/src/commands/mod.rs`
+- `apps/desktop/src-tauri/src/commands/personality.rs`
+- `apps/desktop/src-tauri/src/commands/scanner.rs`
+- `apps/desktop/src-tauri/src/db/mod.rs`
+- `apps/desktop/src-tauri/src/lib.rs`
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added backend rejection for overly broad selected scan roots including `/`,
+  the user home root, and Desktop/Documents/Downloads.
+- Added `get_agent_detail` without reading personality file bodies, sessions,
+  memory, logs, or secret values.
+- Added `read_personality_file` with backend-resolved paths for only
+  `SOUL.md`, `AGENTS.md`, and `USER.md`.
+- Added `create_personality_update_plan` with stale hash checking and unified
+  diff generation.
+- Added `apply_personality_update` with backup creation, temp-file write,
+  fsync, atomic rename, affected-root re-scan, and SQLite index update.
+- Added backup records with file kind, original path, backup path, created time,
+  before hash, and after hash.
+- Added `list_agent_backups` and `restore_personality_backup`; restore creates
+  a new safety backup before applying backup content and then re-scans.
+- Replaced internal phase copy in the app header with user-facing scanner and
+  privacy-index copy.
+- Added Agent Detail tabs for Overview, Personality, Files placeholder, and
+  Backups.
+- Added Personality editor UI with detected/missing states, Markdown textarea,
+  unsaved changes, reset, generate diff, save gating, and backup restore.
+
+### Privacy Boundary
+
+- Frontend never sends arbitrary file paths for personality reads or writes.
+- Backend derives target paths from indexed agent metadata and a whitelisted
+  file kind.
+- Target paths must remain inside the indexed agent/profile root; symlink
+  escapes are rejected.
+- Session, memory, history, transcript, log, env, token, secret, and credential
+  files are not readable through the personality commands.
+- Provider/channel secret fields continue to display only redacted markers.
+- No network request, telemetry, login, cloud sync, chat UI, provider manager,
+  model manager, skill manager, channel manager, migration, marketplace, or
+  SaaS backend was added.
+
+### Test Results
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test`: passed with 24 tests.
+- `cargo check`: passed.
+- `git diff --check`: passed.
+- Privacy network audit passed:
+  `! rg -n "fetch\\(|XMLHttpRequest|sendBeacon|WebSocket" apps/desktop/src apps/desktop/src-tauri/src`.
+- Browser static smoke at `http://127.0.0.1:1420/` passed for page identity,
+  nonblank render, no framework overlay, no console warning/error, and first
+  viewport layout. Browser-only mode does not exercise Tauri commands; desktop
+  runtime behavior is covered by Rust command tests and Tauri build checks.
+
+### Known Risks
+
+- Frontend has no dedicated automated UI test framework; rendered verification
+  is manual/Tauri-runtime focused.
+- Backup directory names use a sanitized agent id plus content hash because
+  indexed agent ids include filesystem path separators.
+- Selected folder scan still uses a text path input rather than a native folder
+  picker.
+
+### Phase 3 Readiness
+
+Phase 2.5 can proceed toward Phase 3 after desktop runtime manual review in the
+Tauri app. Provider/model/skill/channel/migration work remains intentionally
+out of scope for this phase.

@@ -23,6 +23,11 @@ button {
   font: inherit;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .shell {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
@@ -112,6 +117,17 @@ button {
 
 .content {
   padding: 30px;
+}
+
+.workspaceGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+  align-items: start;
+}
+
+.mainColumn {
+  min-width: 0;
 }
 
 .topbar {
@@ -329,6 +345,11 @@ button {
   line-height: 1.45;
 }
 
+.agentRowSelected {
+  border-color: #8bb9aa;
+  background: #f3faf6;
+}
+
 .agentRow strong {
   display: block;
   margin-bottom: 4px;
@@ -402,4 +423,202 @@ button {
   color: #8c2c2c;
   font-size: 14px;
   line-height: 1.45;
+}
+
+.detailPanel {
+  margin-bottom: 0;
+}
+
+.tabBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.tabButton,
+.fileButton,
+.editorActions button,
+.backupRow button {
+  min-height: 34px;
+  border: 1px solid #cfd8d3;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #21302c;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tabButton {
+  padding: 0 12px;
+}
+
+.tabButtonActive,
+.fileButtonActive {
+  border-color: #7dad9d;
+  background: #e8f2ee;
+  color: #173f35;
+}
+
+.detailStack,
+.editorMeta,
+.riskStack,
+.diffPanel {
+  display: grid;
+  gap: 7px;
+  color: #3d4e49;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.personalityEditor {
+  display: grid;
+  gap: 14px;
+}
+
+.fileSelector {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.fileButton {
+  display: grid;
+  gap: 3px;
+  min-height: 58px;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.fileButton strong,
+.backupRow strong {
+  color: #172522;
+  font-size: 13px;
+}
+
+.fileButton span,
+.backupRow span {
+  color: #61706b;
+  font-size: 12px;
+}
+
+.editorMeta {
+  padding: 12px;
+  border: 1px solid #e0e5df;
+  border-radius: 8px;
+  background: #fafbf8;
+}
+
+.markdownEditor {
+  width: 100%;
+  min-height: 340px;
+  max-height: 560px;
+  padding: 14px;
+  resize: vertical;
+  border: 1px solid #cfd8d3;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f2e2a;
+  font:
+    13px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+}
+
+.editorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.editorActions span {
+  margin-right: auto;
+  color: #61706b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.editorActions button,
+.backupRow button {
+  padding: 0 12px;
+}
+
+.editorActions button:last-child {
+  border-color: #173f35;
+  background: #173f35;
+  color: #ffffff;
+}
+
+.rightPanel {
+  position: sticky;
+  top: 22px;
+  display: grid;
+  gap: 16px;
+}
+
+.rightPanel section {
+  padding: 18px;
+  border: 1px solid #dbe1da;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.rightPanel h3 {
+  margin: 0 0 12px;
+  color: #172522;
+  font-size: 16px;
+}
+
+.riskStack span,
+.diffPanel span {
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: #f5faf7;
+}
+
+.diffBox {
+  max-height: 360px;
+  margin: 4px 0 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid #d7dfda;
+  border-radius: 8px;
+  background: #172522;
+  color: #edf6f2;
+  font:
+    12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  white-space: pre;
+}
+
+.backupList {
+  display: grid;
+  gap: 9px;
+}
+
+.backupRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid #e0e5df;
+  border-radius: 8px;
+  background: #fafbf8;
+}
+
+.backupRow div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.backupListCompact .backupRow {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.backupListCompact .backupRow button {
+  justify-self: start;
 }

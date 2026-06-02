@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::scanner::types::{
@@ -37,6 +37,20 @@ pub struct DatabaseReport {
     pub db_path: String,
     pub created: bool,
     pub tables: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupRecord {
+    pub backup_id: String,
+    pub agent_id: String,
+    pub runtime: AgentRuntime,
+    pub file_kind: String,
+    pub original_path: PathBuf,
+    pub backup_path: PathBuf,
+    pub created_at: String,
+    pub content_hash_before: String,
+    pub content_hash_after: String,
 }
 
 pub fn initialize_database() -> Result<DatabaseReport, DatabaseError> {
@@ -210,6 +224,10 @@ fn migrate_phase_one_columns(connection: &Connection) -> Result<(), DatabaseErro
         "health_status",
         "TEXT NOT NULL DEFAULT 'warning'",
     )?;
+    add_column_if_missing(connection, "backups", "file_kind", "TEXT")?;
+    add_column_if_missing(connection, "backups", "original_path", "TEXT")?;
+    add_column_if_missing(connection, "backups", "content_hash_before", "TEXT")?;
+    add_column_if_missing(connection, "backups", "content_hash_after", "TEXT")?;
     Ok(())
 }
 
@@ -401,6 +419,98 @@ pub fn load_scan_roots(connection: &Connection) -> Result<Vec<ScanRoot>, Databas
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(DatabaseError::from)
+}
+
+pub fn insert_backup_record(
+    connection: &Connection,
+    record: &BackupRecord,
+    operation: &str,
+) -> Result<(), DatabaseError> {
+    connection.execute(
+        r#"
+        INSERT INTO backups
+          (id, runtime, agent_id, operation, source_paths_json, backup_path, created_at,
+           file_kind, original_path, content_hash_before, content_hash_after)
+        VALUES
+          (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        ON CONFLICT(id) DO UPDATE SET
+          runtime = excluded.runtime,
+          agent_id = excluded.agent_id,
+          operation = excluded.operation,
+          source_paths_json = excluded.source_paths_json,
+          backup_path = excluded.backup_path,
+          created_at = excluded.created_at,
+          file_kind = excluded.file_kind,
+          original_path = excluded.original_path,
+          content_hash_before = excluded.content_hash_before,
+          content_hash_after = excluded.content_hash_after
+        "#,
+        params![
+            &record.backup_id,
+            record.runtime.as_str(),
+            &record.agent_id,
+            operation,
+            serde_json::to_string(&vec![record.original_path.display().to_string()])?,
+            record.backup_path.display().to_string(),
+            &record.created_at,
+            &record.file_kind,
+            record.original_path.display().to_string(),
+            &record.content_hash_before,
+            &record.content_hash_after,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn load_agent_backups(
+    connection: &Connection,
+    agent_id: &str,
+) -> Result<Vec<BackupRecord>, DatabaseError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT id, runtime, agent_id, file_kind, original_path, backup_path, created_at,
+               content_hash_before, content_hash_after
+        FROM backups
+        WHERE agent_id = ?1 AND file_kind IS NOT NULL
+        ORDER BY created_at DESC
+        "#,
+    )?;
+    let rows = statement.query_map([agent_id], backup_record_from_row)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from)
+}
+
+pub fn load_backup_record(
+    connection: &Connection,
+    backup_id: &str,
+) -> Result<BackupRecord, DatabaseError> {
+    connection
+        .query_row(
+            r#"
+            SELECT id, runtime, agent_id, file_kind, original_path, backup_path, created_at,
+                   content_hash_before, content_hash_after
+            FROM backups
+            WHERE id = ?1 AND file_kind IS NOT NULL
+            "#,
+            [backup_id],
+            backup_record_from_row,
+        )
+        .map_err(DatabaseError::from)
+}
+
+fn backup_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<BackupRecord> {
+    let runtime_text: String = row.get(1)?;
+    Ok(BackupRecord {
+        backup_id: row.get(0)?,
+        runtime: parse_runtime(&runtime_text),
+        agent_id: row.get(2)?,
+        file_kind: row.get(3)?,
+        original_path: PathBuf::from(row.get::<_, String>(4)?),
+        backup_path: PathBuf::from(row.get::<_, String>(5)?),
+        created_at: row.get(6)?,
+        content_hash_before: row.get(7)?,
+        content_hash_after: row.get(8)?,
+    })
 }
 
 fn json_paths(value: String) -> Vec<PathBuf> {

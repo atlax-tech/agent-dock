@@ -10,6 +10,8 @@ use crate::scanner::types::{
 };
 use crate::scanner::{default_candidate_roots, fixture_roots, scan_fixtures};
 
+const BROAD_SCAN_ROOT_ERROR: &str = "Selected folder is too broad. Choose an OpenClaw/Hermes config root, agents/profiles folder, workspace folder, or fixture folder.";
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanSelectedRootRequest {
@@ -93,6 +95,7 @@ fn scan_selected_root_with_connection(
     connection: &rusqlite::Connection,
 ) -> Result<Vec<AgentScanRecord>, String> {
     let path = expand_tilde(&request.path);
+    reject_broad_scan_root(&path)?;
     let records = crate::scanner::scan_selected_root(request.runtime, path.clone())
         .map_err(|error| error.to_string())?;
     upsert_scan_roots(
@@ -124,6 +127,27 @@ fn expand_tilde(path: &str) -> PathBuf {
         }
     }
     PathBuf::from(path)
+}
+
+fn reject_broad_scan_root(path: &std::path::Path) -> Result<(), String> {
+    let comparable = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if comparable.parent().is_none() {
+        return Err(BROAD_SCAN_ROOT_ERROR.to_string());
+    }
+
+    let Some(home) = dirs::home_dir() else {
+        return Ok(());
+    };
+    let home = home.canonicalize().unwrap_or(home);
+    if comparable == home {
+        return Err(BROAD_SCAN_ROOT_ERROR.to_string());
+    }
+    for broad_child in ["Desktop", "Documents", "Downloads"] {
+        if comparable == home.join(broad_child) {
+            return Err(BROAD_SCAN_ROOT_ERROR.to_string());
+        }
+    }
+    Ok(())
 }
 
 fn dedupe_roots(roots: &mut Vec<ScanRoot>) {
@@ -246,5 +270,30 @@ mod tests {
                 && scan_root.path == root
                 && scan_root.source == crate::scanner::types::ScanRootSource::UserSelected
         }));
+    }
+
+    #[test]
+    fn selected_scan_rejects_broad_home_root() {
+        let home = tempfile::tempdir().expect("temp home");
+        initialize_database_in(home.path()).expect("init db");
+        let connection = open_database_in(home.path()).expect("open db");
+
+        let error = scan_selected_root_with_connection(
+            ScanSelectedRootRequest {
+                runtime: AgentRuntime::OpenClaw,
+                path: dirs::home_dir().expect("real home").display().to_string(),
+            },
+            &connection,
+        )
+        .expect_err("reject broad root");
+
+        assert_eq!(error, BROAD_SCAN_ROOT_ERROR);
+    }
+
+    #[test]
+    fn selected_scan_allows_fixture_roots() {
+        let fixture = crate::scanner::repository_root().join("tests/fixtures/hermes");
+
+        assert!(reject_broad_scan_root(&fixture).is_ok());
     }
 }
