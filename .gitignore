@@ -26,3 +26,8 @@ apps/desktop/src-tauri/target/
 npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
+
+# local-only spec/prd documents
+AgentDock_PRD.md
+AgentDock_SPEC.md
+AgentDock_DEV_AGENT_EXECUTION_PROMPT.md
