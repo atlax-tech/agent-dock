@@ -49,6 +49,11 @@ market, chat UI, automatic secret migration, or real OpenClaw/Hermes scanning.
 - Stopped the dev app, Vite server, and Tauri dev process after verification.
 - Pushed `main`, `demo`, and `dev` branches to
   `github.com:atlax-tech/agent-dock`.
+- Ran a Chrome headless local Vite render check at `127.0.0.1:1420`; DOM
+  output confirmed the sidebar, navigation, `Project bootstrap`, and
+  `Local only` Phase 0 shell copy render. The Tauri command bridge is only
+  available in the desktop runtime, so the browser-only runtime error is
+  expected and not product behavior.
 
 ### Risks / Blockers
 
