@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"Default local-only desktop permissions for AgentDock Phase 0.","local":true,"windows":["main"],"permissions":["core:default"]}}
