@@ -47,6 +47,8 @@ market, chat UI, automatic secret migration, or real OpenClaw/Hermes scanning.
   `fetch`, `XMLHttpRequest`, `sendBeacon`, or `WebSocket`; only Tauri config
   schema metadata and the local development URL were present.
 - Stopped the dev app, Vite server, and Tauri dev process after verification.
+- Pushed `main`, `demo`, and `dev` branches to
+  `github.com:atlax-tech/agent-dock`.
 
 ### Risks / Blockers
 
@@ -54,7 +56,7 @@ market, chat UI, automatic secret migration, or real OpenClaw/Hermes scanning.
   scanner, migration, provider, skills, channel, or backup workflows.
 - Visual QA is limited to confirming the desktop app launches; this round did
   not create a full product UI design because Phase 0 is bootstrap-only.
-- GitHub branch push is still pending at the time of this dev log edit.
+- Main/demo/dev branch protection rules are not configured yet.
 
 ### Next Step
 
