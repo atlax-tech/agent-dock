@@ -1,0 +1,8 @@
+name: Companion Agent
+provider: anthropic
+default_model: claude-3-5-sonnet
+fallback_model: claude-3-haiku
+apikey: fixture-openclaw-companion-key
+channels:
+  discord:
+    token: fixture-discord-token

@@ -155,3 +155,90 @@ Forbidden long-lived development branches: `hot-dev`, `agent-dev`,
 - When `main` receives release content, add CI/CODEOWNERS to `main` through the
   release PR and then enable the same six required checks plus CODEOWNERS review
   on `main`.
+
+## 2026-06-02 - Phase 1 Local Scan Engine
+
+### Phase
+
+Phase 1 - Local Scan Engine and unified dashboard.
+
+### Implemented
+
+- Added Rust scanner modules for OpenClaw and Hermes.
+- Added default candidate detection for `~/.openclaw`, `~/.openclaw/agents`,
+  `~/.openclaw/workspace`, `~/.openclaw/workspace-*`, `~/.hermes`, and
+  `~/.hermes/profiles`.
+- Added fixture-first scans for `tests/fixtures/openclaw` and
+  `tests/fixtures/hermes`.
+- Added selected root read-only scan command for user-provided OpenClaw/Hermes
+  folders.
+- Added SQLite cache writes for `scanned_roots` and `agent_index`.
+- Added Phase 1 columns for config paths, personality file paths, skill paths,
+  provider/model/channel summaries, and warnings.
+- Replaced the Phase 0 frontend shell with a Phase 1 dashboard containing
+  Dashboard, Scan, Agents, and Settings sidebar entries.
+- Added dashboard status for runtime detection, last scan time, and
+  Local-only / Read-only privacy mode.
+- Added unified agent list for OpenClaw agents and Hermes profiles.
+- Added minimum fixture data for OpenClaw consulting/companion/workspace agents
+  and Hermes consulting/dev profiles.
+
+### Scanner Support Scope
+
+- Reads only metadata from JSON, YAML, and TOML config files.
+- Records personality files only by path/presence for `SOUL.md`, `AGENTS.md`,
+  and `USER.md`; it does not display their contents.
+- Records skills by path/presence under `skills`.
+- Detects provider, base URL, default model, fallback model, channel hints, and
+  warning states.
+- `scan_default_candidates` only checks whether default roots exist and are
+  readable; it does not deep-scan real user agent/profile contents.
+
+### Privacy Boundary
+
+- Skips private runtime directories named `sessions`, `session`, `history`,
+  `histories`, `memory`, `memories`, `conversation`, `conversations`,
+  `transcript`, `transcripts`, `logs`, `cache`, and `tmp`.
+- Shows skipped private runtime data only as `Skipped private runtime data`.
+- Secret-like fields are detected by field name and represented in the UI as
+  `••••••••`.
+- SQLite does not store API key values, bot tokens, OAuth tokens, encrypted
+  credentials, transcript text, memory text, or session content.
+
+### Not Implemented
+
+- No agent creation, deletion, duplication, migration, personality editing,
+  skill editing, provider manager, channel bot management, token migration,
+  OAuth migration, cloud sync, login, Web UI, plugin market, or SaaS behavior.
+
+### Test Results
+
+- `npm run check`: passed.
+- `cargo test`: passed with Phase 1 scanner tests.
+- Remaining full acceptance commands are run before commit/push and recorded in
+  the final delivery note.
+
+### Manual Verification
+
+- Fixture scan path is available from the dashboard and writes the safe index to
+  SQLite.
+- Default path detection is exposed separately and does not deep-scan real local
+  OpenClaw/Hermes roots.
+- Selected folder scan accepts a user-provided runtime and path and performs a
+  read-only metadata scan.
+- Desktop app build/run verification is performed before delivery.
+
+### Known Risks
+
+- Selected folder scan currently uses a text path input rather than a native
+  folder picker.
+- Scanner metadata extraction is intentionally conservative and may not detect
+  every real OpenClaw/Hermes config variant until real-world structures are
+  added as fixtures.
+- YAML support uses `serde_yaml`, which is deprecated upstream but still
+  adequate for local fixture/config parsing in this phase.
+
+### Next Stage Recommendation
+
+- Add native folder picker support and broaden real-world config fixtures before
+  Phase 2 mutation workflows.

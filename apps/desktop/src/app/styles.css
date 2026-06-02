@@ -167,21 +167,22 @@ button {
   line-height: 1.25;
 }
 
-.statusGrid {
+.summaryGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+  margin-bottom: 16px;
 }
 
-.statusGrid div {
+.summaryGrid div {
   min-height: 92px;
   padding: 14px;
   border: 1px solid #e0e5df;
   border-radius: 8px;
-  background: #fafbf8;
+  background: #ffffff;
 }
 
-.statusGrid span {
+.summaryGrid span {
   display: block;
   margin-bottom: 8px;
   color: #65736e;
@@ -189,7 +190,7 @@ button {
   font-weight: 700;
 }
 
-.statusGrid strong {
+.summaryGrid strong {
   display: block;
   overflow-wrap: anywhere;
   color: #182522;
@@ -197,23 +198,146 @@ button {
   line-height: 1.45;
 }
 
-.boundaryList {
+.scanActions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
 }
 
-.boundaryList span {
-  padding: 9px 11px;
-  border: 1px solid #e2e5df;
+.scanActions button,
+.scanActions select,
+.scanActions input {
+  min-height: 38px;
+  border: 1px solid #cfd8d3;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #21302c;
+  font-size: 13px;
+}
+
+.scanActions button {
+  padding: 0 12px;
+  background: #173f35;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.scanActions select {
+  padding: 0 9px;
+}
+
+.scanActions input {
+  width: min(360px, 100%);
+  padding: 0 10px;
+}
+
+.selectedScan {
+  display: flex;
+  flex: 1;
+  min-width: 420px;
+  gap: 8px;
+}
+
+.rootList {
+  display: grid;
+  gap: 8px;
+}
+
+.rootRow {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 80px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e1e6e1;
   border-radius: 7px;
   background: #fafbf8;
-  color: #41504b;
+  color: #43514d;
   font-size: 13px;
-  font-weight: 650;
+}
+
+.rootRow span,
+.pathText {
+  overflow-wrap: anywhere;
+}
+
+.rootRow em {
+  color: #596b65;
+  font-style: normal;
+  font-weight: 700;
+  text-align: right;
+}
+
+.emptyState {
+  padding: 18px;
+  border: 1px dashed #cbd6d1;
+  border-radius: 8px;
+  background: #fafbf8;
+  color: #51615c;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.agentTable {
+  display: grid;
+  gap: 8px;
+}
+
+.agentHeader,
+.agentRow {
+  display: grid;
+  grid-template-columns: 180px 90px minmax(160px, 1fr) minmax(260px, 1.25fr) minmax(180px, 0.8fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.agentHeader {
+  padding: 0 12px 8px;
+  color: #68756f;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.agentRow {
+  padding: 14px 12px;
+  border: 1px solid #e1e6e1;
+  border-radius: 8px;
+  background: #fafbf8;
+  color: #263531;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.agentRow strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #172522;
+  font-size: 14px;
+}
+
+.agentRow small {
+  display: block;
+  color: #697771;
+  font-size: 12px;
+}
+
+.metadataStack,
+.warningStack {
+  display: grid;
+  gap: 4px;
+}
+
+.warningStack span {
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: #eef4f0;
+  color: #355247;
 }
 
 .errorBox {
+  margin-bottom: 14px;
   padding: 14px;
   border: 1px solid #e5b8b8;
   border-radius: 8px;

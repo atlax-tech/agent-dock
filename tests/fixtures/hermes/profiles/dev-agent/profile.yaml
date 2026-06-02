@@ -1,0 +1,8 @@
+name: Hermes Dev Agent
+provider: openrouter
+default_model: openrouter/auto
+fallback_model: qwen/qwen3-coder
+secret: fixture-hermes-secret
+channels:
+  slack:
+    token: fixture-hermes-slack-token

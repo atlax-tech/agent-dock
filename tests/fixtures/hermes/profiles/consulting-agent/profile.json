@@ -1,0 +1,15 @@
+{
+  "name": "Hermes Consulting Agent",
+  "provider": "openai",
+  "base_url": "https://api.openai.com/v1",
+  "default_model": "gpt-4.1",
+  "fallback_model": "gpt-4.1-mini",
+  "credentials": {
+    "api_key": "fixture-hermes-api-key"
+  },
+  "channels": {
+    "telegram": {
+      "bot_token": "fixture-hermes-bot-token"
+    }
+  }
+}

@@ -1,0 +1,1 @@
+Research skill fixture.

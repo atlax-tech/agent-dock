@@ -52,7 +52,9 @@ mod tests {
         let roots = fixture_scan_summary();
 
         assert_eq!(roots.len(), REQUIRED_FIXTURES.len());
-        assert!(roots.iter().all(|root| root.path.contains("tests/fixtures")));
+        assert!(roots
+            .iter()
+            .all(|root| root.path.contains("tests/fixtures")));
         assert!(roots.iter().any(|root| root.name == "openclaw-basic"));
         assert!(roots.iter().any(|root| root.name == "hermes-basic"));
     }

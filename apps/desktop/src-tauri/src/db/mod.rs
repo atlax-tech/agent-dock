@@ -5,6 +5,8 @@ use rusqlite::Connection;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::scanner::types::{AgentRuntime, AgentScanRecord, ScanRoot};
+
 const DATABASE_FILE: &str = "agentdock.sqlite";
 
 const TABLES: &[&str] = &[
@@ -24,6 +26,8 @@ pub enum DatabaseError {
     Io(#[from] std::io::Error),
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Serialize)]
@@ -36,6 +40,16 @@ pub struct DatabaseReport {
 pub fn initialize_database() -> Result<DatabaseReport, DatabaseError> {
     let home_dir = dirs::home_dir().ok_or(DatabaseError::HomeDirectoryUnavailable)?;
     initialize_database_in(&home_dir)
+}
+
+pub fn open_database() -> Result<Connection, DatabaseError> {
+    let home_dir = dirs::home_dir().ok_or(DatabaseError::HomeDirectoryUnavailable)?;
+    open_database_in(&home_dir)
+}
+
+pub fn open_database_in(home_dir: &Path) -> Result<Connection, DatabaseError> {
+    let report = initialize_database_in(home_dir)?;
+    Ok(Connection::open(report.db_path)?)
 }
 
 pub fn initialize_database_in(home_dir: &Path) -> Result<DatabaseReport, DatabaseError> {
@@ -128,7 +142,243 @@ fn create_schema(connection: &Connection) -> Result<(), DatabaseError> {
         "#,
     )?;
 
+    migrate_phase_one_columns(connection)?;
+
     Ok(())
+}
+
+fn migrate_phase_one_columns(connection: &Connection) -> Result<(), DatabaseError> {
+    add_column_if_missing(
+        connection,
+        "scanned_roots",
+        "source",
+        "TEXT NOT NULL DEFAULT 'defaultCandidate'",
+    )?;
+    add_column_if_missing(
+        connection,
+        "scanned_roots",
+        "exists",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(
+        connection,
+        "scanned_roots",
+        "readable",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(
+        connection,
+        "agent_index",
+        "config_paths_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    add_column_if_missing(
+        connection,
+        "agent_index",
+        "personality_files_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    add_column_if_missing(
+        connection,
+        "agent_index",
+        "skill_paths_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    add_column_if_missing(
+        connection,
+        "agent_index",
+        "provider_summary_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    add_column_if_missing(
+        connection,
+        "agent_index",
+        "model_summary_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    add_column_if_missing(
+        connection,
+        "agent_index",
+        "channel_summary_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    Ok(())
+}
+
+fn add_column_if_missing(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), DatabaseError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(());
+        }
+    }
+    connection.execute_batch(&format!(
+        "ALTER TABLE {table} ADD COLUMN \"{column}\" {definition};"
+    ))?;
+    Ok(())
+}
+
+pub fn upsert_scan_roots(connection: &Connection, roots: &[ScanRoot]) -> Result<(), DatabaseError> {
+    for root in roots {
+        let id = format!("{}:{}", root.runtime.as_str(), root.path.display());
+        connection.execute(
+            r#"
+            INSERT INTO scanned_roots
+              (id, runtime, path, enabled, last_scanned_at, source, "exists", readable)
+            VALUES
+              (?1, ?2, ?3, 1, ?4, ?5, ?6, ?7)
+            ON CONFLICT(id) DO UPDATE SET
+              runtime = excluded.runtime,
+              path = excluded.path,
+              last_scanned_at = excluded.last_scanned_at,
+              source = excluded.source,
+              "exists" = excluded."exists",
+              readable = excluded.readable
+            "#,
+            (
+                id,
+                root.runtime.as_str(),
+                root.path.display().to_string(),
+                root.last_scanned_at.as_deref(),
+                serde_json::to_string(&root.source)?,
+                bool_as_i64(root.exists),
+                bool_as_i64(root.readable),
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+pub fn upsert_agent_records(
+    connection: &Connection,
+    records: &[AgentScanRecord],
+) -> Result<(), DatabaseError> {
+    for record in records {
+        let paths = record
+            .config_paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        let personalities = record
+            .personality_files
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        let skills = record
+            .skill_paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+
+        connection.execute(
+            r#"
+            INSERT INTO agent_index
+              (id, runtime, display_name, root_path, workspace_path, profile_path, config_path,
+               env_path, soul_path, agents_path, user_path, memory_path, sessions_path,
+               detected_provider, default_model, fallback_model, status, warnings_json,
+               last_scanned_at, config_paths_json, personality_files_json, skill_paths_json,
+               provider_summary_json, model_summary_json, channel_summary_json)
+            VALUES
+              (?1, ?2, ?3, ?4, NULL, NULL, ?5, NULL, NULL, NULL, NULL, NULL, NULL,
+               ?6, ?7, ?8, 'indexed', ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+            ON CONFLICT(id) DO UPDATE SET
+              runtime = excluded.runtime,
+              display_name = excluded.display_name,
+              root_path = excluded.root_path,
+              config_path = excluded.config_path,
+              detected_provider = excluded.detected_provider,
+              default_model = excluded.default_model,
+              fallback_model = excluded.fallback_model,
+              status = excluded.status,
+              warnings_json = excluded.warnings_json,
+              last_scanned_at = excluded.last_scanned_at,
+              config_paths_json = excluded.config_paths_json,
+              personality_files_json = excluded.personality_files_json,
+              skill_paths_json = excluded.skill_paths_json,
+              provider_summary_json = excluded.provider_summary_json,
+              model_summary_json = excluded.model_summary_json,
+              channel_summary_json = excluded.channel_summary_json
+            "#,
+            (
+                &record.id,
+                record.runtime.as_str(),
+                &record.name,
+                record.root_path.display().to_string(),
+                paths.first().cloned(),
+                record.provider_summary.provider.as_deref(),
+                record.model_summary.default_model.as_deref(),
+                record.model_summary.fallback_model.as_deref(),
+                serde_json::to_string(&record.warnings)?,
+                &record.last_scanned_at,
+                serde_json::to_string(&paths)?,
+                serde_json::to_string(&personalities)?,
+                serde_json::to_string(&skills)?,
+                serde_json::to_string(&record.provider_summary)?,
+                serde_json::to_string(&record.model_summary)?,
+                serde_json::to_string(&record.channel_summary)?,
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+pub fn load_agent_records(connection: &Connection) -> Result<Vec<AgentScanRecord>, DatabaseError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT id, runtime, display_name, root_path, config_paths_json, personality_files_json,
+               skill_paths_json, provider_summary_json, model_summary_json, channel_summary_json,
+               warnings_json, last_scanned_at
+        FROM agent_index
+        ORDER BY runtime, display_name
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        let runtime_text: String = row.get(1)?;
+        let runtime = if runtime_text == AgentRuntime::Hermes.as_str() {
+            AgentRuntime::Hermes
+        } else {
+            AgentRuntime::OpenClaw
+        };
+        Ok(AgentScanRecord {
+            id: row.get(0)?,
+            runtime,
+            name: row.get(2)?,
+            root_path: PathBuf::from(row.get::<_, String>(3)?),
+            config_paths: json_paths(row.get::<_, String>(4)?),
+            personality_files: json_paths(row.get::<_, String>(5)?),
+            skill_paths: json_paths(row.get::<_, String>(6)?),
+            provider_summary: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
+            model_summary: serde_json::from_str(&row.get::<_, String>(8)?).unwrap_or_default(),
+            channel_summary: serde_json::from_str(&row.get::<_, String>(9)?).unwrap_or_default(),
+            warnings: serde_json::from_str(&row.get::<_, String>(10)?).unwrap_or_default(),
+            last_scanned_at: row.get(11)?,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DatabaseError::from)
+}
+
+fn json_paths(value: String) -> Vec<PathBuf> {
+    serde_json::from_str::<Vec<String>>(&value)
+        .unwrap_or_default()
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn bool_as_i64(value: bool) -> i64 {
+    if value {
+        1
+    } else {
+        0
+    }
 }
 
 #[allow(dead_code)]
