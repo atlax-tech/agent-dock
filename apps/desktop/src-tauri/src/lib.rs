@@ -45,6 +45,8 @@ pub fn run() {
             commands::lifecycle::duplicate_agent_plan,
             commands::lifecycle::apply_duplicate_agent,
             commands::lifecycle::delete_agent_plan,
+            commands::lifecycle::create_delete_agent_mutation_plan,
+            commands::lifecycle::apply_delete_agent_mutation_plan,
             commands::lifecycle::apply_delete_agent,
             commands::lifecycle::list_trash_items,
             commands::lifecycle::restore_trash_item_plan,

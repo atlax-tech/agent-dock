@@ -1,5 +1,82 @@
 # AgentDock Development Log
 
+## 2026-06-03 - Delete Agent Soft Trash Plan
+
+### Task Goal
+
+Implement Phase 2 backend safety plan and minimal Dashboard wiring for
+Agent/Profile soft delete into AgentDock Trash.
+
+### Files Changed
+
+- `apps/desktop/src-tauri/src/commands/lifecycle.rs`
+- `apps/desktop/src-tauri/src/lib.rs`
+- `apps/desktop/src/app/App.tsx`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added `create_delete_agent_mutation_plan`, a narrow Tauri command that
+  returns a `delete-agent` MutationPlan with product, agent/profile id,
+  affected file paths, trash target path, backup requirement, restart
+  requirement, warnings, and plan hash.
+- Added `apply_delete_agent_mutation_plan`, a narrow backend apply command that
+  validates the plan hash, copies a backup, writes a local backup registry
+  manifest, moves the agent/profile directory into
+  `~/.agentdock/trash/<product>/<agentId>/<timestamp>/`, writes a trash
+  manifest, and rescans.
+- Reused the existing Basic Settings trash icon; no UI elements, drawers,
+  dialogs, routes, or navigation entries were added.
+- Clicking the trash icon requests only the delete-agent MutationPlan and logs
+  it to the console. It does not apply the mutation.
+- Disabled the legacy `apply_delete_agent` command path so the old delete apply
+  cannot be used for this slice.
+
+### Boundary Confirmation
+
+- Soft delete uses move-to-trash semantics; no permanent delete path was added.
+- The new apply path uses `fs::rename` to move the source directory to trash and
+  does not call `remove_dir_all`.
+- No restore, permanent delete, copy, create, Provider, Personality, Sessions,
+  Memories, Skills, Permissions, Channels, Scheduled Tasks, Install, Uninstall,
+  or Migration behavior was implemented.
+- No session or memory full content is read.
+- No secret plaintext is read or serialized.
+- No OpenClaw or Hermes runtime config files are written.
+- PRD/SPEC/UI_UX product documents were not modified.
+- Validation used temp test fixtures, including a Hermes `test_agent` profile;
+  no existing user agent/profile was used.
+
+### Tests Added / Updated
+
+- Added `delete_agent_mutation_plan_uses_agentdock_trash_path`.
+- Added `apply_delete_agent_mutation_plan_backs_up_then_moves_to_trash`.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  68 Rust tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `git diff --check`: passed.
+- `git status --short`: reviewed.
+
+### Risks
+
+- Backup registry is a local JSON manifest under `~/.agentdock/backup-registry`
+  for this slice, not a full SQLite-backed registry workflow.
+- The apply command exists but is intentionally not wired to the Dashboard UI
+  until a reviewed preview/confirmation surface is added.
+- Runtime-specific official disable commands were not wired because the
+  available local source only confirmed OpenClaw trash/delete semantics, while
+  Hermes profile disable/delete semantics remain unconfirmed.
+
+### Next Step
+
+Add an explicit plan preview/confirmation surface for applying soft delete, then
+wire apply only after the user confirms the generated MutationPlan.
+
 ## 2026-06-03 - Basic Settings Env Path and Gateway Detection
 
 ### Task Goal

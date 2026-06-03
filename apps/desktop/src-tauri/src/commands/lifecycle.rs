@@ -38,6 +38,20 @@ pub struct DeleteRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DeleteAgentMutationPlanRequest {
+    pub product: String,
+    pub agent_id: String,
+    pub agent_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyDeleteAgentMutationRequest {
+    pub plan: DeleteAgentMutationPlan,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ApplyLifecycleRequest {
     pub plan_hash: String,
 }
@@ -68,6 +82,37 @@ pub struct LifecycleResult {
     pub scan_result: Vec<AgentScanRecord>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteAgentMutationPlan {
+    pub plan_hash: String,
+    pub product: String,
+    pub agent_id: String,
+    pub operation: String,
+    pub source_path: PathBuf,
+    pub affected_files: Vec<PathBuf>,
+    pub trash_target_path: PathBuf,
+    pub backup_required: bool,
+    pub backup_path: PathBuf,
+    pub restart_required: bool,
+    pub warnings: Vec<String>,
+    pub blocked_reason: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteAgentMutationResult {
+    pub product: String,
+    pub agent_id: String,
+    pub operation: String,
+    pub source_path: PathBuf,
+    pub trash_target_path: PathBuf,
+    pub backup_path: PathBuf,
+    pub registry_path: PathBuf,
+    pub scan_result: Vec<AgentScanRecord>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrashItem {
@@ -86,6 +131,19 @@ pub struct TrashManifest {
     pub runtime: String,
     pub name: String,
     pub deleted_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupRegistryManifest {
+    product: String,
+    agent_id: String,
+    operation: String,
+    source_path: String,
+    backup_path: String,
+    trash_target_path: String,
+    created_at: String,
+    note: String,
 }
 
 const PRIVATE_DATA_DIRS: &[&str] = &[
@@ -480,48 +538,158 @@ pub fn delete_agent_plan(request: DeleteRequest) -> Result<LifecyclePlan, String
 }
 
 #[tauri::command]
-pub fn apply_delete_agent(request: ApplyLifecycleRequest) -> Result<LifecycleResult, String> {
-    let _home = dirs::home_dir().ok_or_else(|| "Could not resolve home directory.".to_string())?;
-    let connection = open_database().map_err(|error| error.to_string())?;
-    let agents = load_agent_records(&connection).map_err(|error| error.to_string())?;
-    let agent = agents
-        .iter()
-        .find(|a| is_runtime_root_or_container(&a.root_path) == false)
-        .ok_or_else(|| "No valid agent found for delete.".to_string())?;
-    let plan = delete_agent_plan(DeleteRequest {
-        agent_id: agent.id.clone(),
-    })?;
-    if plan.plan_hash != request.plan_hash {
-        return Err("Stale plan: re-generate the lifecycle plan before applying.".to_string());
+pub fn create_delete_agent_mutation_plan(
+    request: DeleteAgentMutationPlanRequest,
+) -> Result<DeleteAgentMutationPlan, String> {
+    let home = dirs::home_dir().ok_or_else(|| "Could not resolve home directory.".to_string())?;
+    create_delete_agent_mutation_plan_with_home(&home, request)
+}
+
+fn create_delete_agent_mutation_plan_with_home(
+    home: &Path,
+    request: DeleteAgentMutationPlanRequest,
+) -> Result<DeleteAgentMutationPlan, String> {
+    let runtime = parse_runtime(&request.product);
+    let source_path = PathBuf::from(&request.agent_path);
+    let agent_path_segment = agent_trash_path_segment(&request.agent_id, &source_path);
+    let created_at = now_millis();
+    let trash_target_path = trash_base_dir(home)
+        .join(runtime.as_str())
+        .join(&agent_path_segment)
+        .join(&created_at);
+    let backup_path = home
+        .join(".agentdock")
+        .join("backups")
+        .join("delete-agent")
+        .join(runtime.as_str())
+        .join(&agent_path_segment)
+        .join(&created_at);
+    let mut warnings = vec![
+        "This is a soft-delete plan; files will be moved to AgentDock Trash.".to_string(),
+        "No session, memory, env, credential, token, auth, or cookie file body will be read."
+            .to_string(),
+        "Restore and permanent delete are outside this phase.".to_string(),
+    ];
+    let mut blocked_reason = None;
+
+    if request.product != AgentRuntime::OpenClaw.as_str()
+        && request.product != AgentRuntime::Hermes.as_str()
+    {
+        blocked_reason = Some("Unsupported runtime product.".to_string());
+    } else if request.agent_id.trim().is_empty() {
+        blocked_reason = Some("Agent/profile id is required.".to_string());
+    } else if !source_path.is_dir() {
+        blocked_reason = Some(format!(
+            "Agent/profile path is not a directory: {}",
+            source_path.display()
+        ));
+    } else if is_runtime_root_or_container(&source_path) {
+        blocked_reason =
+            Some("Cannot soft-delete a runtime root/global/container directory.".to_string());
     }
-    if plan.blocked_reason.is_some() {
-        return Err(format!("Plan is blocked: {}", plan.blocked_reason.unwrap()));
+
+    if source_path.join(".env").is_file() {
+        warnings.push("Agent/profile env file detected; value content will not be read.".to_string());
     }
-    let trash_dir = plan
-        .backup_path
-        .ok_or_else(|| "Delete plan has no trash path.".to_string())?;
-    let manifest = TrashManifest {
-        original_path: agent.root_path.display().to_string(),
-        runtime: agent.runtime.as_str().to_string(),
-        name: agent.name.clone(),
-        deleted_at: now_millis(),
+
+    let affected_files = if blocked_reason.is_none() {
+        collect_affected_file_paths(&source_path)?
+    } else {
+        Vec::new()
     };
-    write_trash_manifest(&trash_dir, &manifest)?;
-    if agent.root_path.exists() {
-        fs::create_dir_all(&trash_dir).map_err(|error| error.to_string())?;
-        move_dir_contents(&agent.root_path, &trash_dir).map_err(|error| error.to_string())?;
-        fs::remove_dir_all(&agent.root_path).map_err(|error| error.to_string())?;
+    let mut plan = DeleteAgentMutationPlan {
+        plan_hash: String::new(),
+        product: runtime.as_str().to_string(),
+        agent_id: request.agent_id,
+        operation: "delete-agent".to_string(),
+        source_path,
+        affected_files,
+        trash_target_path,
+        backup_required: true,
+        backup_path,
+        restart_required: true,
+        warnings,
+        blocked_reason,
+        created_at,
+    };
+    plan.plan_hash = compute_delete_agent_plan_hash(&plan);
+    Ok(plan)
+}
+
+#[tauri::command]
+pub fn apply_delete_agent_mutation_plan(
+    request: ApplyDeleteAgentMutationRequest,
+) -> Result<DeleteAgentMutationResult, String> {
+    let home = dirs::home_dir().ok_or_else(|| "Could not resolve home directory.".to_string())?;
+    apply_delete_agent_mutation_plan_with_home(&home, request.plan)
+}
+
+fn apply_delete_agent_mutation_plan_with_home(
+    home: &Path,
+    plan: DeleteAgentMutationPlan,
+) -> Result<DeleteAgentMutationResult, String> {
+    if plan.operation != "delete-agent" {
+        return Err("Unsupported mutation operation.".to_string());
     }
-    let scan_result = crate::scanner::scan_selected_root(agent.runtime, agent.root_path.clone())
+    if compute_delete_agent_plan_hash(&plan) != plan.plan_hash {
+        return Err("Stale delete-agent plan: re-generate before applying.".to_string());
+    }
+    if let Some(reason) = &plan.blocked_reason {
+        return Err(format!("Plan is blocked: {reason}"));
+    }
+    if !plan.source_path.is_dir() {
+        return Err("Agent/profile source path no longer exists.".to_string());
+    }
+    if is_runtime_root_or_container(&plan.source_path) {
+        return Err("Cannot soft-delete a runtime root/global/container directory.".to_string());
+    }
+    if plan.trash_target_path.exists() {
+        return Err(format!(
+            "Trash target already exists: {}",
+            plan.trash_target_path.display()
+        ));
+    }
+
+    copy_dir_recursive(&plan.source_path, &plan.backup_path).map_err(|error| error.to_string())?;
+    let registry_path = write_backup_registry_manifest(home, &plan)?;
+    if let Some(parent) = plan.trash_target_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::rename(&plan.source_path, &plan.trash_target_path).map_err(|error| error.to_string())?;
+    let trash_manifest = TrashManifest {
+        original_path: plan.source_path.display().to_string(),
+        runtime: plan.product.clone(),
+        name: plan.agent_id.clone(),
+        deleted_at: plan.created_at.clone(),
+    };
+    write_trash_manifest(&plan.trash_target_path, &trash_manifest)?;
+
+    let runtime = parse_runtime(&plan.product);
+    let scan_root = plan
+        .source_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| plan.source_path.clone());
+    let scan_result = crate::scanner::scan_selected_root(runtime, scan_root)
         .map_err(|error| error.to_string())?;
-    upsert_agent_records(&connection, &scan_result).map_err(|error| error.to_string())?;
-    Ok(LifecycleResult {
-        operation: "delete".to_string(),
-        runtime: agent.runtime,
-        target_path: agent.root_path.clone(),
-        backup_path: Some(trash_dir),
+    Ok(DeleteAgentMutationResult {
+        product: plan.product,
+        agent_id: plan.agent_id,
+        operation: "delete-agent".to_string(),
+        source_path: plan.source_path,
+        trash_target_path: plan.trash_target_path,
+        backup_path: plan.backup_path,
+        registry_path,
         scan_result,
     })
+}
+
+#[tauri::command]
+pub fn apply_delete_agent(_request: ApplyLifecycleRequest) -> Result<LifecycleResult, String> {
+    Err(
+        "Legacy delete apply is disabled. Use apply_delete_agent_mutation_plan for soft delete."
+            .to_string(),
+    )
 }
 
 #[tauri::command]
@@ -693,6 +861,26 @@ fn compute_plan_hash(plan: &LifecyclePlan) -> String {
     format!("sha256:{:x}", hasher.finalize())
 }
 
+fn compute_delete_agent_plan_hash(plan: &DeleteAgentMutationPlan) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(plan.product.as_bytes());
+    hasher.update(plan.agent_id.as_bytes());
+    hasher.update(plan.operation.as_bytes());
+    hasher.update(plan.source_path.to_string_lossy().as_bytes());
+    hasher.update(plan.trash_target_path.to_string_lossy().as_bytes());
+    hasher.update(plan.backup_required.to_string().as_bytes());
+    hasher.update(plan.backup_path.to_string_lossy().as_bytes());
+    hasher.update(plan.restart_required.to_string().as_bytes());
+    hasher.update(plan.created_at.as_bytes());
+    if let Some(reason) = &plan.blocked_reason {
+        hasher.update(reason.as_bytes());
+    }
+    for file in &plan.affected_files {
+        hasher.update(file.to_string_lossy().as_bytes());
+    }
+    format!("sha256:{:x}", hasher.finalize())
+}
+
 fn trash_base_dir(home: &Path) -> PathBuf {
     home.join(".agentdock").join("trash")
 }
@@ -707,6 +895,33 @@ fn read_trash_manifest(trash_dir: &Path) -> Result<TrashManifest, String> {
     let content =
         fs::read_to_string(trash_dir.join("manifest.json")).map_err(|error| error.to_string())?;
     serde_json::from_str(&content).map_err(|error| error.to_string())
+}
+
+fn write_backup_registry_manifest(
+    home: &Path,
+    plan: &DeleteAgentMutationPlan,
+) -> Result<PathBuf, String> {
+    let manifest = BackupRegistryManifest {
+        product: plan.product.clone(),
+        agent_id: plan.agent_id.clone(),
+        operation: plan.operation.clone(),
+        source_path: plan.source_path.display().to_string(),
+        backup_path: plan.backup_path.display().to_string(),
+        trash_target_path: plan.trash_target_path.display().to_string(),
+        created_at: plan.created_at.clone(),
+        note: "Local file registry for AgentDock delete-agent soft delete backup.".to_string(),
+    };
+    let registry_path = home
+        .join(".agentdock")
+        .join("backup-registry")
+        .join(format!(
+            "delete-agent-{}-{}.json",
+            stable_slug(&plan.agent_id),
+            plan.created_at
+        ));
+    let content = serde_json::to_string_pretty(&manifest).map_err(|error| error.to_string())?;
+    atomic_write(&registry_path, content.as_bytes())?;
+    Ok(registry_path)
 }
 
 fn scan_trash_dir(home: &Path) -> Result<Vec<TrashItem>, String> {
@@ -755,6 +970,34 @@ fn is_private_data_file(name: &str) -> bool {
     PRIVATE_DATA_FILES
         .iter()
         .any(|f| name.eq_ignore_ascii_case(f))
+}
+
+fn collect_affected_file_paths(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut paths = Vec::new();
+    collect_affected_file_paths_inner(root, root, &mut paths)?;
+    paths.sort();
+    Ok(paths)
+}
+
+fn collect_affected_file_paths_inner(
+    root: &Path,
+    current: &Path,
+    paths: &mut Vec<PathBuf>,
+) -> Result<(), String> {
+    let entries = fs::read_dir(current).map_err(|error| error.to_string())?;
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        paths.push(
+            path.strip_prefix(root)
+                .unwrap_or(&path)
+                .to_path_buf(),
+        );
+        if path.is_dir() {
+            collect_affected_file_paths_inner(root, &path, paths)?;
+        }
+    }
+    Ok(())
 }
 
 fn atomic_write(path: &Path, content: &[u8]) -> Result<(), String> {
@@ -806,6 +1049,37 @@ fn stable_slug(value: &str) -> String {
         .collect::<String>();
     slug.truncate(80);
     format!("{slug}-{}", &hash[..12])
+}
+
+fn agent_trash_path_segment(agent_id: &str, source_path: &Path) -> String {
+    source_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .map(safe_path_segment)
+        .unwrap_or_else(|| safe_path_segment(agent_id))
+}
+
+fn safe_path_segment(value: &str) -> String {
+    let mut segment = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    while segment.starts_with('.') {
+        segment.remove(0);
+    }
+    if segment.trim().is_empty() {
+        "unknown-agent".to_string()
+    } else {
+        segment.truncate(96);
+        segment
+    }
 }
 
 fn now_millis() -> String {
@@ -970,6 +1244,8 @@ fn move_dir_contents(src: &Path, dst: &Path) -> Result<(), std::io::Error> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use tempfile::tempdir;
 
     use super::*;
@@ -1102,6 +1378,82 @@ mod tests {
         assert_eq!(loaded.runtime, manifest.runtime);
         assert_eq!(loaded.name, manifest.name);
         assert_eq!(loaded.deleted_at, manifest.deleted_at);
+    }
+
+    #[test]
+    fn delete_agent_mutation_plan_uses_agentdock_trash_path() {
+        let home = tempdir().expect("home");
+        let profile = home.path().join(".hermes/profiles/test_agent");
+        fs::create_dir_all(&profile).expect("profile");
+        fs::write(profile.join("profile.json"), r#"{"name":"test_agent"}"#)
+            .expect("config");
+
+        let plan = create_delete_agent_mutation_plan_with_home(
+            home.path(),
+            DeleteAgentMutationPlanRequest {
+                product: "hermes".to_string(),
+                agent_id: "hermes:/tmp/somewhere/test_agent".to_string(),
+                agent_path: profile.display().to_string(),
+            },
+        )
+        .expect("plan");
+
+        assert_eq!(plan.product, "hermes");
+        assert_eq!(plan.operation, "delete-agent");
+        assert!(plan.backup_required);
+        assert!(plan.restart_required);
+        assert!(plan.blocked_reason.is_none());
+        assert!(plan.trash_target_path.starts_with(
+            home.path()
+                .join(".agentdock")
+                .join("trash")
+                .join("hermes")
+                .join("test_agent")
+        ));
+        assert!(plan
+            .affected_files
+            .iter()
+            .any(|path| path == Path::new("profile.json")));
+    }
+
+    #[test]
+    fn apply_delete_agent_mutation_plan_backs_up_then_moves_to_trash() {
+        let home = tempdir().expect("home");
+        let profile = home.path().join(".hermes/profiles/test_agent");
+        fs::create_dir_all(profile.join("sessions")).expect("sessions");
+        fs::write(profile.join("profile.json"), r#"{"name":"test_agent"}"#)
+            .expect("config");
+        fs::write(profile.join(".env"), "SECRET_DELETE_CANARY=1").expect("env");
+        fs::write(profile.join("sessions/private.json"), "private session body")
+            .expect("session");
+
+        let plan = create_delete_agent_mutation_plan_with_home(
+            home.path(),
+            DeleteAgentMutationPlanRequest {
+                product: "hermes".to_string(),
+                agent_id: "hermes:/tmp/somewhere/test_agent".to_string(),
+                agent_path: profile.display().to_string(),
+            },
+        )
+        .expect("plan");
+        let result = apply_delete_agent_mutation_plan_with_home(home.path(), plan)
+            .expect("apply");
+        let rendered = serde_json::to_string(&result).expect("serialize");
+
+        assert!(!profile.exists());
+        assert!(result.trash_target_path.join("profile.json").is_file());
+        assert!(result.trash_target_path.join(".env").is_file());
+        assert!(result.backup_path.join("profile.json").is_file());
+        assert!(result.registry_path.is_file());
+        assert!(result.trash_target_path.starts_with(
+            home.path()
+                .join(".agentdock")
+                .join("trash")
+                .join("hermes")
+                .join("test_agent")
+        ));
+        assert!(!rendered.contains("SECRET_DELETE_CANARY"));
+        assert!(!rendered.contains("private session body"));
     }
 
     #[test]

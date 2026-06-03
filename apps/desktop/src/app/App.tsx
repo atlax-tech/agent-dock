@@ -89,6 +89,19 @@ type ManagedAgent = {
   confidence: DetectionConfidence;
 };
 
+type DeleteAgentMutationPlan = {
+  planHash: string;
+  product: RuntimeProduct;
+  agentId: string;
+  operation: "delete-agent";
+  affectedFiles: string[];
+  trashTargetPath: string;
+  backupRequired: boolean;
+  restartRequired: boolean;
+  warnings: string[];
+  blockedReason?: string | null;
+};
+
 type AgentScanSource = "desktop" | "fixture" | "empty";
 type ScanProgressState = "hidden" | "scanning" | "complete";
 type DashboardRuntime = MockRuntime & RuntimeInstallStatus;
@@ -410,6 +423,27 @@ export function App() {
       });
   }
 
+  function requestDeleteAgentPlan(agent: ManagedAgent) {
+    if (!hasTauriCommandBridge()) {
+      console.warn("Tauri command bridge unavailable; delete-agent plan was not requested.");
+      return;
+    }
+
+    invoke<DeleteAgentMutationPlan>("create_delete_agent_mutation_plan", {
+      request: {
+        product: agent.product,
+        agentId: agent.id,
+        agentPath: agent.workspaceOrProfilePath,
+      },
+    })
+      .then((plan) => {
+        console.info("delete-agent MutationPlan", plan);
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to create delete-agent MutationPlan", error);
+      });
+  }
+
   return (
     <main className="appShell">
       <aside className="dock" aria-label="AgentDock navigation">
@@ -502,6 +536,7 @@ export function App() {
             runtimeUpdateMessage={runtimeUpdateMessage}
             runtimeUpdateState={runtimeUpdateState}
             onRequestRuntimeUpdate={requestRuntimeUpdate}
+            onRequestDeleteAgentPlan={requestDeleteAgentPlan}
             setExpandedItem={setExpandedItem}
             setSelectedItem={setSelectedItem}
             setSelectedOperation={setSelectedOperation}
@@ -534,6 +569,7 @@ function DashboardView({
   runtimeUpdateMessage,
   runtimeUpdateState,
   onRequestRuntimeUpdate,
+  onRequestDeleteAgentPlan,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -557,6 +593,7 @@ function DashboardView({
   runtimeUpdateMessage: string;
   runtimeUpdateState: "idle" | "running" | "success" | "error";
   onRequestRuntimeUpdate: (product: RuntimeProduct) => void;
+  onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -618,6 +655,7 @@ function DashboardView({
           setSelectedItem={setSelectedItem}
           setSelectedOperation={setSelectedOperation}
           onRequestRuntimeUpdate={onRequestRuntimeUpdate}
+          onRequestDeleteAgentPlan={onRequestDeleteAgentPlan}
         />
       ) : (
         <NotInstalledDashboard runtime={runtime} />
@@ -660,6 +698,7 @@ function InstalledDashboard({
   selectedOperation,
   selectedOperationNode,
   onRequestRuntimeUpdate,
+  onRequestDeleteAgentPlan,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -677,6 +716,7 @@ function InstalledDashboard({
   selectedOperation: OperationNode;
   selectedOperationNode: { id: OperationNode; label: string; description: string };
   onRequestRuntimeUpdate: (product: RuntimeProduct) => void;
+  onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -773,7 +813,11 @@ function InstalledDashboard({
 
         <article className="operationPane">
           {selectedOperation === "basic" ? (
-            <BasicSettingsPane runtime={runtime} selectedAgent={selectedAgent} />
+            <BasicSettingsPane
+              runtime={runtime}
+              selectedAgent={selectedAgent}
+              onRequestDeleteAgentPlan={onRequestDeleteAgentPlan}
+            />
           ) : (
             <PlaceholderOperationPane
               runtime={runtime}
@@ -788,9 +832,11 @@ function InstalledDashboard({
 }
 
 function BasicSettingsPane({
+  onRequestDeleteAgentPlan,
   runtime,
   selectedAgent,
 }: {
+  onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
   runtime: DashboardRuntime;
   selectedAgent: ManagedAgent | null;
 }) {
@@ -821,9 +867,9 @@ function BasicSettingsPane({
         <button
           className="trashIconButton"
           type="button"
-          disabled
           aria-label="删除/回收"
-          title="删除/回收尚未实现"
+          title="生成删除/回收计划"
+          onClick={() => onRequestDeleteAgentPlan(selectedAgent)}
         >
           <svg aria-hidden="true" viewBox="0 0 24 24">
             <path d="M3 6h18" />
