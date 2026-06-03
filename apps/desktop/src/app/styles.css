@@ -148,8 +148,7 @@ button {
 .secondaryButton,
 .addAgentButton,
 .notInstalledPanel button,
-.migrationControls button,
-.settingsFooter button {
+.migrationControls button {
   min-height: 38px;
   padding: 0 14px;
   border-radius: 8px;
@@ -158,17 +157,42 @@ button {
 }
 
 .topButton {
-  min-width: 76px;
+  min-width: 44px;
   background: #ffffff;
   border: 1px solid #cfd8d4;
   cursor: pointer;
 }
 
+.iconButton {
+  display: inline-grid;
+  width: 44px;
+  padding: 0;
+  place-items: center;
+}
+
+.languageButton {
+  display: inline-grid;
+  width: 44px;
+  padding: 0;
+  place-items: center;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.iconButton svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
 .secondaryButton:disabled,
 .addAgentButton:disabled,
 .notInstalledPanel button:disabled,
-.migrationControls button:disabled,
-.settingsFooter button:disabled {
+.migrationControls button:disabled {
   color: #6c7773;
   cursor: not-allowed;
 }
@@ -241,11 +265,8 @@ button {
 .managementLayout {
   display: grid;
   grid-template-columns: minmax(290px, 0.78fr) minmax(420px, 1.22fr);
+  align-items: start;
   gap: 0;
-  overflow: hidden;
-  border: 1px solid #dce2df;
-  border-radius: 8px;
-  background: #ffffff;
 }
 
 .notInstalledPanel,
@@ -263,7 +284,12 @@ button {
 }
 
 .treePanel {
+  padding-left: 0;
   border-right: 1px solid #dce2df;
+}
+
+.operationPane {
+  padding-right: 0;
 }
 
 .panelHeader h3,
@@ -278,7 +304,7 @@ button {
 .accordionTree {
   display: grid;
   gap: 2px;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .agentAccordion {
@@ -337,7 +363,7 @@ button {
 
 .addAgentButton {
   width: 100%;
-  margin-top: 14px;
+  margin-top: 12px;
   background: #f1f5f3;
 }
 
@@ -350,8 +376,7 @@ button {
 .operationPane p,
 .notInstalledPanel p,
 .settingsModule p,
-.migrationNotice span,
-.migrationControls p {
+.migrationNotice span {
   margin: 0;
   color: #485852;
   line-height: 1.55;
@@ -389,18 +414,24 @@ button {
 .safetyList,
 .policyGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 0;
+  border-top: 1px solid #dce2df;
+  border-bottom: 1px solid #dce2df;
 }
 
 .safetyList span,
 .policyGrid span {
-  padding: 9px 10px;
-  border-radius: 6px;
+  padding: 9px 0;
+  border-bottom: 1px solid #edf1ef;
   color: #31515b;
-  background: #f1f6f4;
+  background: transparent;
   font-size: 13px;
   font-weight: 650;
+}
+
+.safetyList span:last-child,
+.policyGrid span:last-child {
+  border-bottom: 0;
 }
 
 .notInstalledPanel {
@@ -434,8 +465,8 @@ button {
 
 .migrationWorkspace {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(132px, 0.28fr) minmax(260px, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(280px, 1fr) 48px minmax(280px, 1fr);
+  gap: 10px;
 }
 
 .migrationColumn,
@@ -448,7 +479,7 @@ button {
 .migrationControls {
   align-items: center;
   justify-content: start;
-  padding: 56px 8px 0;
+  padding: 54px 0 0;
 }
 
 .migrationList {
@@ -486,9 +517,16 @@ button {
 }
 
 .directionButton {
-  width: 100%;
-  min-width: 132px;
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
   white-space: nowrap;
+}
+
+.settingsPage {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 132px);
 }
 
 .settingsWorkspace {
@@ -533,16 +571,19 @@ button {
 
 .settingsFooter {
   display: flex;
-  gap: 8px;
+  gap: 14px;
   align-items: center;
   flex-wrap: wrap;
-  padding: 14px 18px;
-  background: #fbfcfb;
+  margin-top: auto;
+  padding: 0 4px 2px;
+  color: #7a8580;
+  font-size: 12px;
 }
 
 .settingsFooter button {
-  min-height: 32px;
-  padding: 0 10px;
+  min-height: auto;
+  padding: 0;
+  color: inherit;
   background: transparent;
 }
 

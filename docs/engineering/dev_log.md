@@ -934,3 +934,251 @@ Rust/Tauri files were unchanged.
 Either run a manual desktop visual pass for density/responsiveness or start the
 first read-only runtime status view-model slice without scanning real
 OpenClaw/Hermes home directories.
+
+## 2026-06-03 - 003 UI Hard Fix Follow-Up
+
+### Task Goal
+
+Fix the remaining `003-frontend-layout-density-and-surface-refinement` issues
+without redesigning the shell: remove lingering empty-space/card-like patterns,
+make Migration center controls a single compact button, and move Settings
+footer links outside the settings workspace.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Removed the Migration center-column explanatory paragraph so the center column
+  renders only one compact direction button.
+- Kept `保存前必须预览` as the page-level Migration notice under the page title
+  area.
+- Moved Settings footer links outside `.settingsWorkspace` into a separate
+  page-level footer.
+- Kept `.settingsWorkspace` limited to the seven required settings rows:
+  App data directory, Sync, Backup/Trash, Updates, Logs, Language, and Theme.
+- Reworked the Settings footer as small, weak-color page footer text separated
+  from the settings row group.
+- Further reduced Dashboard OperationPane module-card feeling by changing the
+  read-only safety area from filled blocks into lightweight inspector rows.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed,
+  52 tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `rg -n "@tauri-apps/api/core|invoke\\(" apps/desktop/src/app/App.tsx || true`:
+  no output.
+- `rg -n "scan_default_candidates|scan_fixture_roots|scan_selected_root|apply_create_agent|apply_create_profile|apply_duplicate_agent|apply_delete_agent|apply_model_provider_update|apply_personality_update|restore_personality_backup|apply_restore_trash_item" apps/desktop/src/app/App.tsx || true`:
+  no output.
+- `git diff --stat`: only frontend files before this log entry.
+
+### Result
+
+The hard fixes are frontend-only. No Rust/Tauri files changed, no backend
+command references were added, and no `invoke` usage was introduced.
+
+### Risks
+
+- No manual visual QA was performed in the running desktop app.
+- The shell still uses read-only mock data and a single-file frontend
+  implementation.
+
+### Next Step
+
+Run a manual visual pass for Dashboard, Migration, and Settings at desktop and
+small widths before starting the next implementation slice.
+
+## 2026-06-03 - 003 Screenshot Feedback Hard Fix
+
+### Task Goal
+
+Address the screenshot feedback for the 003 UI refinement without introducing
+new behavior: remove the Dashboard management shell/card feeling, make the
+Migration center control a narrow symbol-only switch, and place Settings footer
+links at the page bottom.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Removed the visual outer container treatment from `.managementLayout` and
+  stopped the Dashboard grid from stretching panels into a large empty shell.
+- Kept Dashboard tree and OperationPane connected through a simple divider,
+  without making them separate large cards.
+- Changed the Migration center button label from product names to the compact
+  `⇄` symbol, with the direction text only in `aria-label`/`title`.
+- Reduced the Migration center column to a narrow fixed column so the side
+  OpenClaw/Hermes columns remain dominant.
+- Changed Settings page layout so the footer sits at the bottom of the page
+  outside `.settingsWorkspace`.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed,
+  52 tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `rg -n "min-height:\\s*[5-9][0-9]{2}|height:\\s*[5-9][0-9]{2}|OpenClaw ⇄ Hermes|选择两侧条目|当前仅为布局占位|migrationControls p|Footer links" apps/desktop/src/app/App.tsx apps/desktop/src/app/styles.css || true`:
+  no output.
+- `rg -n "@tauri-apps/api/core|invoke\\(" apps/desktop/src/app/App.tsx || true`:
+  no output.
+- `rg -n "scan_default_candidates|scan_fixture_roots|scan_selected_root|apply_create_agent|apply_create_profile|apply_duplicate_agent|apply_delete_agent|apply_model_provider_update|apply_personality_update|restore_personality_backup|apply_restore_trash_item" apps/desktop/src/app/App.tsx || true`:
+  no output.
+
+### Result
+
+The screenshot-specific fixes are frontend-only. No Rust/Tauri files changed,
+no backend command references were added, and no `invoke` usage was introduced.
+
+### Risks
+
+- Manual visual QA should still confirm the exact desktop viewport shown in the
+  screenshot.
+- Settings uses page-level height only to pin the footer to the bottom; the
+  settings workspace itself remains natural height.
+
+### Next Step
+
+Run the desktop app visually and confirm Dashboard, Migration, and Settings
+against the screenshot feedback before starting another feature slice.
+
+## 2026-06-03 - Dashboard Add Agent Button Placement
+
+### Task Goal
+
+Move the Dashboard add agent/profile action to the top of the agent/profile
+tree so it remains visible when the list grows.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Moved the disabled `+ Add Agent` / `+ Add Profile` placeholder from below the
+  accordion tree to directly under the tree header.
+- Adjusted spacing so the add action belongs to the tree controls before the
+  scroll-prone list content.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `rg -n "@tauri-apps/api/core|invoke\\(" apps/desktop/src/app/App.tsx || true`:
+  no output.
+- `rg -n "scan_default_candidates|scan_fixture_roots|scan_selected_root|apply_create_agent|apply_create_profile|apply_duplicate_agent|apply_delete_agent|apply_model_provider_update|apply_personality_update|restore_personality_backup|apply_restore_trash_item" apps/desktop/src/app/App.tsx || true`:
+  no output.
+
+### Result
+
+Frontend-only placement adjustment. No runtime behavior, backend command,
+mock-data, or Chinese operation label changes.
+
+### Risks
+
+- Manual visual QA should confirm the button remains visually light enough at
+  the top of long lists.
+
+### Next Step
+
+Run the frontend validation commands and inspect the Dashboard tree in the app.
+
+## 2026-06-03 - Top Control Icon Buttons
+
+### Task Goal
+
+Replace the visible language/theme text controls with icon-only buttons while
+preserving the existing read-only shell behavior.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Replaced `中 / EN` visible text with an inline language SVG icon.
+- Replaced `白天` / `深夜` visible text with inline sun/moon SVG icons.
+- Kept `aria-label` and `title` text for accessibility and hover context.
+- Added compact icon-button sizing without adding dependencies.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `rg -n "@tauri-apps/api/core|invoke\\(" apps/desktop/src/app/App.tsx || true`:
+  no output.
+- `rg -n "scan_default_candidates|scan_fixture_roots|scan_selected_root|apply_create_agent|apply_create_profile|apply_duplicate_agent|apply_delete_agent|apply_model_provider_update|apply_personality_update|restore_personality_backup|apply_restore_trash_item" apps/desktop/src/app/App.tsx || true`:
+  no output.
+
+### Result
+
+Frontend-only visual control update. No backend, routing, dependency, mock-data,
+or runtime behavior changes.
+
+### Risks
+
+- Manual visual QA should confirm the language icon reads clearly at the final
+  desktop size.
+
+### Next Step
+
+Run validation and inspect the top-right controls in the app.
+
+## 2026-06-03 - Language Button State Text Fix
+
+### Task Goal
+
+Fix the top-right language control so it shows the current language state as
+`中` or `EN` instead of an abstract language icon.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added local `language` UI state for the placeholder language toggle.
+- Changed the language button visible content to `中` for Chinese and `EN` for
+  English.
+- Kept the theme control as an icon-only button.
+- Added a stable text-button style for the compact language control.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `rg -n "@tauri-apps/api/core|invoke\\(" apps/desktop/src/app/App.tsx || true`:
+  no output.
+- `rg -n "scan_default_candidates|scan_fixture_roots|scan_selected_root|apply_create_agent|apply_create_profile|apply_duplicate_agent|apply_delete_agent|apply_model_provider_update|apply_personality_update|restore_personality_backup|apply_restore_trash_item" apps/desktop/src/app/App.tsx || true`:
+  no output.
+
+### Result
+
+Frontend-only top-control correction. No backend, dependency, route, mock-data,
+or runtime behavior changes.
+
+### Risks
+
+- Language switching remains UI placeholder state only and does not translate
+  the application yet.
+
+### Next Step
+
+Run validation and visually confirm the language button state text.

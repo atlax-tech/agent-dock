@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 type DockRoute = "dashboard" | "migration" | "settings";
 type RuntimeProduct = "openclaw" | "hermes";
 type ThemeMode = "light" | "dark";
+type LanguageMode = "zh" | "en";
 
 type OperationNode =
   | "basic"
@@ -159,6 +160,7 @@ export function App() {
   const [selectedItem, setSelectedItem] = useState("main");
   const [selectedOperation, setSelectedOperation] = useState<OperationNode>("basic");
   const [theme, setTheme] = useState<ThemeMode>("light");
+  const [language, setLanguage] = useState<LanguageMode>("zh");
 
   const runtime = mockRuntimes[selectedRuntime];
   const selectedOperationNode = useMemo(
@@ -210,15 +212,39 @@ export function App() {
           </div>
 
           <div className="topControls" aria-label="Application display controls">
-            <button className="topButton" type="button">
-              中 / EN
+            <button
+              className="topButton languageButton"
+              type="button"
+              aria-label="切换语言"
+              title="切换语言"
+              onClick={() => setLanguage((current) => (current === "zh" ? "en" : "zh"))}
+            >
+              {language === "zh" ? "中" : "EN"}
             </button>
             <button
-              className="topButton"
+              className="topButton iconButton"
               type="button"
+              aria-label="切换主题"
+              title="切换主题"
               onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
             >
-              {theme === "light" ? "白天" : "深夜"}
+              {theme === "light" ? (
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2" />
+                  <path d="M12 20v2" />
+                  <path d="M4.93 4.93l1.41 1.41" />
+                  <path d="M17.66 17.66l1.41 1.41" />
+                  <path d="M2 12h2" />
+                  <path d="M20 12h2" />
+                  <path d="M4.93 19.07l1.41-1.41" />
+                  <path d="M17.66 6.34l1.41-1.41" />
+                </svg>
+              ) : (
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M20.4 14.4A8.2 8.2 0 0 1 9.6 3.6 8.7 8.7 0 1 0 20.4 14.4Z" />
+                </svg>
+              )}
             </button>
           </div>
         </header>
@@ -358,6 +384,10 @@ function InstalledDashboard({
             </div>
           </div>
 
+          <button className="addAgentButton" type="button" disabled>
+            {runtime.addLabel}
+          </button>
+
           <div className="accordionTree">
             {runtime.items.map((item) => {
               const expanded = expandedItem === item;
@@ -400,10 +430,6 @@ function InstalledDashboard({
               );
             })}
           </div>
-
-          <button className="addAgentButton" type="button" disabled>
-            {runtime.addLabel}
-          </button>
         </article>
 
         <article className="operationPane">
@@ -488,10 +514,15 @@ function MigrationView() {
         </article>
 
         <article className="migrationControls">
-          <button className="directionButton" type="button" disabled aria-label="Switch migration direction">
-            OpenClaw ⇄ Hermes
+          <button
+            className="directionButton"
+            type="button"
+            disabled
+            aria-label="Switch migration direction"
+            title="切换迁移方向"
+          >
+            ⇄
           </button>
-          <p>选择两侧条目后在这里切换迁移方向；当前仅为布局占位。</p>
         </article>
 
         <article className="migrationColumn">
@@ -514,21 +545,23 @@ function MigrationView() {
 
 function SettingsView() {
   return (
-    <section className="settingsWorkspace">
-      <div className="settingsHeader">
-        <p className="eyebrow">AgentDock 设置</p>
-        <h3>本地应用设置模块</h3>
-      </div>
-      <div className="settingsList">
-        {settingsModules.map((module) => (
-          <article className="settingsModule" key={module.title}>
-            <div>
-              <h4>{module.title}</h4>
-              <p>{module.detail}</p>
-            </div>
-            <span>{module.status}</span>
-          </article>
-        ))}
+    <section className="settingsPage">
+      <div className="settingsWorkspace">
+        <div className="settingsHeader">
+          <p className="eyebrow">AgentDock 设置</p>
+          <h3>本地应用设置模块</h3>
+        </div>
+        <div className="settingsList">
+          {settingsModules.map((module) => (
+            <article className="settingsModule" key={module.title}>
+              <div>
+                <h4>{module.title}</h4>
+                <p>{module.detail}</p>
+              </div>
+              <span>{module.status}</span>
+            </article>
+          ))}
+        </div>
       </div>
       <footer className="settingsFooter" aria-label="Settings footer links">
         {settingsFooterLinks.map((link) => (
