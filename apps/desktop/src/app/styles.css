@@ -985,6 +985,62 @@ button {
   background: transparent;
 }
 
+.deletePlanPreview {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.deletePlanPreview h4 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.25;
+  color: #233339;
+}
+
+.deletePlanPreview .detailGrid dd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.deletePlanPreview .previewBlocked {
+  padding: 10px 12px;
+  border: 1px solid #e8b8b8;
+  border-radius: 8px;
+  color: #7a2222;
+  background: #fff0f0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.deletePlanPreview .previewExplanation {
+  padding: 10px 12px;
+  border: 1px solid #ead8b8;
+  border-radius: 8px;
+  color: #5a4724;
+  background: #fff8ea;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.deletePlanPreview .previewCancelButton {
+  justify-self: start;
+  padding: 8px 16px;
+  border-radius: 6px;
+  color: #40504a;
+  background: #f4f8f6;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.deletePlanPreview .previewCancelButton:hover {
+  background: #e8f0ec;
+}
+
 @media (max-width: 960px) {
   .runtimeStatus,
   .managementLayout,

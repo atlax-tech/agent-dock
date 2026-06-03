@@ -1,5 +1,71 @@
 # AgentDock Development Log
 
+## 2026-06-03 - Delete Agent MutationPlan Preview UI (017b)
+
+### Task Goal
+
+Implement only the Delete Agent MutationPlan preview UI inside Basic Settings /
+OperationPane. When the trash icon is clicked, call create_delete_agent_mutation_plan,
+store the returned plan in frontend state, and render the plan preview inline.
+Do not call apply_delete_agent_mutation_plan. Do not add confirm/apply behavior.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added `deleteAgentPlan` state to App component.
+- Wired trash icon click to `create_delete_agent_mutation_plan`; on success the
+  returned `DeleteAgentMutationPlan` is stored in state instead of logged to console.
+- Passed `deleteAgentPlan` and `onDismissDeletePlan` through DashboardView →
+  InstalledDashboard → BasicSettingsPane props chain.
+- Rendered inline preview in BasicSettingsPane when `deleteAgentPlan` is present.
+  Preview shows: operation title (删除/回收计划预览), Agent/Profile ID, affected
+  files count, trash target path, backup path, warnings list, blocked reason if
+  present, and explanation copy.
+- Added cancel-only dismiss button that clears `deleteAgentPlan` state.
+- Added `backupPath` field to frontend `DeleteAgentMutationPlan` type to match
+  backend Rust struct.
+- Added CSS classes: `.deletePlanPreview`, `.previewBlocked`, `.previewExplanation`,
+  `.previewCancelButton`.
+- No apply/confirm button was added.
+- No `apply_delete_agent_mutation_plan` call was made.
+- No new route, Trash page, drawer, or modal was introduced.
+- No Rust/Tauri files were modified.
+- No package dependencies were added.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed (31 modules, 14.08 kB CSS, 218.21 kB JS).
+- `git diff --check`: passed.
+- `rg -n "apply_delete_agent_mutation_plan|applyDeletePlan|确认移入回收站" apps/desktop/src/app/App.tsx`: no hits (forbidden patterns not present).
+
+### Boundary Confirmation
+
+- No `apply_delete_agent_mutation_plan` call was made.
+- No apply/confirm button exists.
+- No Rust/Tauri files were modified.
+- No package dependencies were added.
+- No new route, Trash page, drawer, or modal was added.
+- No real OpenClaw/Hermes directories were scanned or mutated.
+- Preview is read-only; only `create_delete_agent_mutation_plan` is called.
+
+### Risks
+
+- Low. This is a read-only preview; no mutation is applied.
+- The `backupPath` field was added to the frontend type but only rendered; no
+  write path uses it yet.
+- Cancel dismiss clears the plan state; there is no persistence across sessions.
+
+### Next Step
+
+Wire `apply_delete_agent_mutation_plan` with a confirm button in a follow-up task
+after the preview UI is accepted.
+
 ## 2026-06-03 - Delete Agent Soft Trash Plan
 
 ### Task Goal

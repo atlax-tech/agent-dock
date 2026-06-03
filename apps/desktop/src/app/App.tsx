@@ -97,6 +97,7 @@ type DeleteAgentMutationPlan = {
   affectedFiles: string[];
   trashTargetPath: string;
   backupRequired: boolean;
+  backupPath: string;
   restartRequired: boolean;
   warnings: string[];
   blockedReason?: string | null;
@@ -244,6 +245,7 @@ export function App() {
   const [runtimeDetectionError, setRuntimeDetectionError] = useState("");
   const [runtimeUpdateState, setRuntimeUpdateState] = useState<"idle" | "running" | "success" | "error">("idle");
   const [runtimeUpdateMessage, setRuntimeUpdateMessage] = useState("");
+  const [deleteAgentPlan, setDeleteAgentPlan] = useState<DeleteAgentMutationPlan | null>(null);
 
   const runtime = useMemo(
     () => ({
@@ -437,7 +439,7 @@ export function App() {
       },
     })
       .then((plan) => {
-        console.info("delete-agent MutationPlan", plan);
+        setDeleteAgentPlan(plan);
       })
       .catch((error: unknown) => {
         console.error("Failed to create delete-agent MutationPlan", error);
@@ -537,6 +539,8 @@ export function App() {
             runtimeUpdateState={runtimeUpdateState}
             onRequestRuntimeUpdate={requestRuntimeUpdate}
             onRequestDeleteAgentPlan={requestDeleteAgentPlan}
+            deleteAgentPlan={deleteAgentPlan}
+            onDismissDeletePlan={() => setDeleteAgentPlan(null)}
             setExpandedItem={setExpandedItem}
             setSelectedItem={setSelectedItem}
             setSelectedOperation={setSelectedOperation}
@@ -570,6 +574,8 @@ function DashboardView({
   runtimeUpdateState,
   onRequestRuntimeUpdate,
   onRequestDeleteAgentPlan,
+  deleteAgentPlan,
+  onDismissDeletePlan,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -594,6 +600,8 @@ function DashboardView({
   runtimeUpdateState: "idle" | "running" | "success" | "error";
   onRequestRuntimeUpdate: (product: RuntimeProduct) => void;
   onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
+  deleteAgentPlan: DeleteAgentMutationPlan | null;
+  onDismissDeletePlan: () => void;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -656,6 +664,8 @@ function DashboardView({
           setSelectedOperation={setSelectedOperation}
           onRequestRuntimeUpdate={onRequestRuntimeUpdate}
           onRequestDeleteAgentPlan={onRequestDeleteAgentPlan}
+          deleteAgentPlan={deleteAgentPlan}
+          onDismissDeletePlan={onDismissDeletePlan}
         />
       ) : (
         <NotInstalledDashboard runtime={runtime} />
@@ -699,6 +709,8 @@ function InstalledDashboard({
   selectedOperationNode,
   onRequestRuntimeUpdate,
   onRequestDeleteAgentPlan,
+  deleteAgentPlan,
+  onDismissDeletePlan,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -717,6 +729,8 @@ function InstalledDashboard({
   selectedOperationNode: { id: OperationNode; label: string; description: string };
   onRequestRuntimeUpdate: (product: RuntimeProduct) => void;
   onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
+  deleteAgentPlan: DeleteAgentMutationPlan | null;
+  onDismissDeletePlan: () => void;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -817,6 +831,8 @@ function InstalledDashboard({
               runtime={runtime}
               selectedAgent={selectedAgent}
               onRequestDeleteAgentPlan={onRequestDeleteAgentPlan}
+              deleteAgentPlan={deleteAgentPlan}
+              onDismissDeletePlan={onDismissDeletePlan}
             />
           ) : (
             <PlaceholderOperationPane
@@ -835,10 +851,14 @@ function BasicSettingsPane({
   onRequestDeleteAgentPlan,
   runtime,
   selectedAgent,
+  deleteAgentPlan,
+  onDismissDeletePlan,
 }: {
   onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
   runtime: DashboardRuntime;
   selectedAgent: ManagedAgent | null;
+  deleteAgentPlan: DeleteAgentMutationPlan | null;
+  onDismissDeletePlan: () => void;
 }) {
   if (!selectedAgent) {
     return (
@@ -941,6 +961,50 @@ function BasicSettingsPane({
           <DetailItem label="最近修改时间" value={formatLastModified(selectedAgent.lastModified)} />
         </dl>
       </section>
+
+      {deleteAgentPlan ? (
+        <section className="deletePlanPreview" aria-label="Delete agent plan preview">
+          <h4>删除/回收计划预览</h4>
+          <dl className="detailGrid">
+            <div>
+              <dt>Agent/Profile ID</dt>
+              <dd>{deleteAgentPlan.agentId}</dd>
+            </div>
+            <div>
+              <dt>受影响文件数</dt>
+              <dd>{deleteAgentPlan.affectedFiles.length}</dd>
+            </div>
+            <div>
+              <dt>Trash 目标路径</dt>
+              <dd>{deleteAgentPlan.trashTargetPath}</dd>
+            </div>
+            <div>
+              <dt>备份路径</dt>
+              <dd>{deleteAgentPlan.backupPath}</dd>
+            </div>
+          </dl>
+          {deleteAgentPlan.warnings.length > 0 ? (
+            <div className="warningList">
+              {deleteAgentPlan.warnings.map((warning, index) => (
+                <span key={index}>{warning}</span>
+              ))}
+            </div>
+          ) : null}
+          {deleteAgentPlan.blockedReason ? (
+            <div className="previewBlocked">{deleteAgentPlan.blockedReason}</div>
+          ) : null}
+          <div className="previewExplanation">
+            这不会永久删除文件。AgentDock 会先创建备份，再将该 Agent/Profile 积入本地 Trash。移入后它会从 AgentDock 管理列表中移除；如果运行时或 channel 已缓存该 Agent，可能需要重启 Gateway 后才会完全失效。
+          </div>
+          <button
+            className="previewCancelButton"
+            type="button"
+            onClick={onDismissDeletePlan}
+          >
+            取消
+          </button>
+        </section>
+      ) : null}
     </>
   );
 }
