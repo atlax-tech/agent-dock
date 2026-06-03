@@ -799,3 +799,74 @@ migration commands.
 Plan the next vertical slice: either split the frontend scaffold into stable
 route/component boundaries or add a read-only backend view model for runtime
 install status without scanning real OpenClaw/Hermes home directories.
+
+## 2026-06-03 - 002 Frontend UI Contract Alignment
+
+### Task Goal
+
+Implement `002-frontend-ui-contract-alignment` to bring the read-only frontend
+scaffold closer to `docs/product/AgentDock_UI_UX_redesign.md`.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Replaced top-right segmented controls with two button-style controls:
+  `中 / EN` and `白天 / 深夜`.
+- Changed operation labels to Chinese-first labels exactly matching the UI
+  contract.
+- Added mock OpenClaw agents: `main`, `consulting-agent`, `dev-agent`.
+- Added mock Hermes profiles: `default`, `consulting`, `auto-business`.
+- Changed installed Dashboard to a compact runtime status strip followed by a
+  two-column management layout.
+- Nested operation nodes under each mock agent/profile accordion item.
+- Removed the global operation function list from the visible UI.
+- Added `+ Add Agent` / `+ Add Profile` placeholders at the bottom of the
+  accordion tree.
+- Made OperationPane update from selected runtime, selected agent/profile, and
+  selected operation.
+- Changed not-installed Dashboard to show only the not-installed panel, install
+  placeholder, and command preview placeholder.
+- Reworked Migration into a full-width three-column workspace:
+  OpenClaw agents, controls, Hermes profiles.
+- Reworked Settings into a full-width modular settings page with App data
+  directory, Sync, Backup/Trash, Updates, Logs, Language, Theme, and Footer
+  links.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed,
+  52 tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `rg -n "@tauri-apps/api/core|invoke\\(" apps/desktop/src/app/App.tsx`: no output.
+- `rg -n "scan_default_candidates|scan_fixture_roots|scan_selected_root|apply_create_agent|apply_create_profile|apply_duplicate_agent|apply_delete_agent|apply_model_provider_update|apply_personality_update|restore_personality_backup|apply_restore_trash_item" apps/desktop/src/app/App.tsx`: no output.
+- `rg -n "fetch|XMLHttpRequest|sendBeacon|WebSocket|telemetry|analytics|login|cloud|upload" apps/desktop/src apps/desktop/src-tauri/src`: one existing backend string about ComfyUI not uploading files during scan; no new frontend network behavior.
+- `git diff --stat`: two frontend files changed before this log entry.
+- `git status --short`: two frontend files modified before this log entry.
+
+### Result
+
+The frontend now follows the requested UI contract more closely: Chinese-first
+operation labels, multiple mock agents/profiles, accordion-scoped operations,
+no global function list, full-width Migration columns, and full-width Settings
+modules.
+
+### Risks
+
+- All runtime, agent/profile, migration, and settings data is still mock data.
+- No real runtime install status or backend view model exists yet.
+- No manual desktop visual QA was performed in this round.
+- Backend command modules from earlier phases still exist but are not invoked
+  by the visible frontend shell.
+
+### Next Step
+
+After UI acceptance, either split the frontend scaffold into stable components
+or add a read-only runtime status view model without scanning real
+OpenClaw/Hermes home directories.

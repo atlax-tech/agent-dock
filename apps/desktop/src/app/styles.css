@@ -60,10 +60,12 @@ button {
 .brandBlock h1,
 .brandBlock p,
 .topBar h2,
-.statusPanel h3,
-.treePanel h3,
+.panelHeader h3,
 .operationPane h3,
-.placeholderPage h3 {
+.notInstalledPanel h3,
+.migrationColumn h3,
+.settingsHeader h3,
+.settingsModule h4 {
   margin: 0;
 }
 
@@ -141,7 +143,33 @@ button {
   flex-wrap: wrap;
 }
 
-.segmentedControl,
+.topButton,
+.secondaryButton,
+.addAgentButton,
+.notInstalledPanel button,
+.migrationControls button {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 8px;
+  color: #31515b;
+  background: #e8eeeb;
+}
+
+.topButton {
+  min-width: 76px;
+  background: #ffffff;
+  border: 1px solid #cfd8d4;
+  cursor: pointer;
+}
+
+.secondaryButton:disabled,
+.addAgentButton:disabled,
+.notInstalledPanel button:disabled,
+.migrationControls button:disabled {
+  color: #6c7773;
+  cursor: not-allowed;
+}
+
 .runtimeSwitcher {
   display: inline-flex;
   overflow: hidden;
@@ -150,7 +178,6 @@ button {
   background: #ffffff;
 }
 
-.segmentedControl button,
 .runtimeSwitcher button {
   min-height: 36px;
   padding: 0 13px;
@@ -159,12 +186,10 @@ button {
   cursor: pointer;
 }
 
-.segmentedControl button + button,
 .runtimeSwitcher button + button {
   border-left: 1px solid #cfd8d4;
 }
 
-.segmentActive,
 .runtimeActive {
   color: #0f2f3a !important;
   background: #dcebe7 !important;
@@ -173,135 +198,118 @@ button {
 
 .dashboardStack {
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 
 .dashboardToolbar {
   justify-content: space-between;
 }
 
-.secondaryButton,
-.statusPanel button {
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 8px;
-  color: #31515b;
-  background: #e8eeeb;
-}
-
-.secondaryButton:disabled,
-.statusPanel button:disabled {
-  color: #6c7773;
-  cursor: not-allowed;
-}
-
-.statusGrid {
+.runtimeStatus {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #dce2df;
 }
 
-.statusPanel,
+.runtimeStatus div {
+  min-width: 0;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.runtimeStatus span {
+  display: block;
+  color: #66736d;
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.runtimeStatus strong {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #172026;
+  font-size: 13px;
+}
+
+.managementLayout {
+  display: grid;
+  grid-template-columns: minmax(290px, 0.78fr) minmax(420px, 1.22fr);
+  gap: 14px;
+  min-height: 560px;
+}
+
 .treePanel,
 .operationPane,
-.placeholderPage {
+.notInstalledPanel,
+.migrationColumn,
+.migrationControls,
+.settingsWorkspace {
   border: 1px solid #dce2df;
   border-radius: 8px;
   background: #ffffff;
 }
 
-.statusPanel {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 18px;
-  min-height: 210px;
-  padding: 18px;
+.treePanel,
+.operationPane,
+.notInstalledPanel,
+.migrationColumn,
+.migrationControls {
+  padding: 16px;
 }
 
-.statusPanel h3,
-.treePanel h3,
+.panelHeader h3,
 .operationPane h3,
-.placeholderPage h3 {
+.notInstalledPanel h3,
+.migrationColumn h3,
+.settingsHeader h3 {
   font-size: 18px;
   line-height: 1.25;
 }
 
-.statusPanel p,
-.operationPane p,
-.placeholderPage p {
-  margin: 0;
-  color: #485852;
-  line-height: 1.55;
-}
-
-.statusList {
+.accordionTree {
   display: grid;
-  gap: 10px;
-  margin: 0;
+  gap: 8px;
+  margin-top: 14px;
 }
 
-.statusList div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 9px;
-  border-bottom: 1px solid #edf1ef;
-}
-
-.statusList dt {
-  color: #66736d;
-  font-size: 13px;
-}
-
-.statusList dd {
-  margin: 0;
-  color: #1d2b31;
-  font-weight: 650;
-  text-align: right;
-}
-
-.dashboardGrid {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
-  gap: 16px;
-}
-
-.treePanel,
-.operationPane,
-.placeholderPage {
-  padding: 18px;
-}
-
-.treeRoot {
-  display: grid;
-  gap: 10px;
-  margin-top: 18px;
-}
-
-.treeRuntime,
-.treeAgent {
-  padding: 12px;
+.agentAccordion {
+  border: 1px solid #e2e8e5;
   border-radius: 8px;
-  background: #f3f6f4;
-  font-weight: 700;
+  overflow: hidden;
 }
 
-.treeAgent {
-  color: #596761;
-  font-weight: 600;
+.agentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  color: #233339;
+  background: #f6f8f7;
+  cursor: pointer;
+  text-align: left;
+}
+
+.agentHeaderActive {
+  background: #e4efeb;
+  font-weight: 750;
 }
 
 .operationList {
   display: grid;
-  gap: 6px;
-  padding-left: 14px;
+  gap: 4px;
+  padding: 8px;
+  background: #ffffff;
 }
 
 .operationItem {
-  min-height: 36px;
-  padding: 0 12px;
+  min-height: 34px;
+  padding: 0 10px;
   border-radius: 8px;
   color: #40504a;
   background: transparent;
@@ -319,10 +327,53 @@ button {
   font-weight: 700;
 }
 
+.addAgentButton {
+  width: 100%;
+  margin-top: 14px;
+}
+
 .operationPane {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
+}
+
+.operationPane p,
+.notInstalledPanel p,
+.settingsModule p,
+.migrationNotice span {
+  margin: 0;
+  color: #485852;
+  line-height: 1.55;
+}
+
+.paneMeta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  margin: 0;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #dce2df;
+}
+
+.paneMeta div {
+  min-width: 0;
+  padding: 12px;
+  background: #f8faf9;
+}
+
+.paneMeta dt {
+  color: #66736d;
+  font-size: 12px;
+}
+
+.paneMeta dd {
+  margin: 5px 0 0;
+  color: #172026;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .safetyList,
@@ -342,13 +393,119 @@ button {
   font-weight: 650;
 }
 
-.placeholderPage {
+.notInstalledPanel {
   display: grid;
-  gap: 18px;
-  max-width: 920px;
+  gap: 16px;
+  min-height: 420px;
+  align-content: start;
 }
 
-@media (max-width: 860px) {
+.commandPreview {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f3f6f4;
+}
+
+.commandPreview span {
+  color: #66736d;
+  font-size: 13px;
+}
+
+.commandPreview code {
+  color: #172026;
+  white-space: normal;
+}
+
+.migrationWorkspace {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(220px, 0.72fr) minmax(240px, 1fr);
+  gap: 14px;
+  min-height: 620px;
+}
+
+.migrationColumn,
+.migrationControls {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.migrationControls {
+  justify-content: center;
+}
+
+.migrationList {
+  display: grid;
+  gap: 8px;
+}
+
+.migrationList button {
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 8px;
+  color: #233339;
+  background: #f6f8f7;
+  text-align: left;
+}
+
+.migrationNotice {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #edf5f2;
+}
+
+.settingsWorkspace {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  min-height: 620px;
+}
+
+.settingsList {
+  display: grid;
+  gap: 10px;
+}
+
+.settingsModule {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.35fr);
+  gap: 18px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid #e2e8e5;
+  border-radius: 8px;
+  background: #fdfefe;
+}
+
+.settingsModule h4 {
+  font-size: 15px;
+}
+
+.settingsModule span {
+  justify-self: end;
+  color: #31515b;
+  font-size: 13px;
+  font-weight: 750;
+  text-align: right;
+}
+
+@media (max-width: 960px) {
+  .runtimeStatus,
+  .managementLayout,
+  .migrationWorkspace,
+  .paneMeta,
+  .safetyList,
+  .policyGrid,
+  .settingsModule {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
   .appShell {
     grid-template-columns: 1fr;
   }
@@ -370,12 +527,5 @@ button {
   .dashboardToolbar {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .statusGrid,
-  .dashboardGrid,
-  .safetyList,
-  .policyGrid {
-    grid-template-columns: 1fr;
   }
 }
