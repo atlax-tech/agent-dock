@@ -220,17 +220,20 @@ pub(crate) fn parse_config(path: &Path) -> Option<Value> {
     }
 }
 
-pub(crate) fn collect_config_files(root: &Path, warnings: &mut Vec<ScanWarning>) -> Vec<PathBuf> {
+pub(crate) fn collect_config_file_metadata(
+    root: &Path,
+    warnings: &mut Vec<ScanWarning>,
+) -> Vec<ConfigFileMetadata> {
     let mut files = Vec::new();
     collect_config_files_inner(root, warnings, &mut files);
-    files.sort();
+    files.sort_by(|left, right| left.path.cmp(&right.path));
     files
 }
 
 fn collect_config_files_inner(
     root: &Path,
     warnings: &mut Vec<ScanWarning>,
-    files: &mut Vec<PathBuf>,
+    files: &mut Vec<ConfigFileMetadata>,
 ) {
     if is_private_runtime_dir(root) {
         warnings.push(warning(
@@ -260,10 +263,59 @@ fn collect_config_files_inner(
                 "Skipped secret-bearing config file",
                 WarningSeverity::Info,
             ));
+            files.push(ConfigFileMetadata {
+                role: config_file_role(&path),
+                path,
+                sensitive: true,
+                skipped: true,
+            });
         } else if is_config_file(&path) {
-            files.push(path);
+            files.push(ConfigFileMetadata {
+                role: config_file_role(&path),
+                path,
+                sensitive: false,
+                skipped: false,
+            });
         }
     }
+}
+
+fn config_file_role(path: &Path) -> String {
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let parent_name = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if is_secret_bearing_config_file(path) {
+        return "secret-file".to_string();
+    }
+    if parent_name == "skills" {
+        return "skill".to_string();
+    }
+    if file_name.contains("identity") || file_name == "agent.json" || file_name == "profile.json" {
+        return "identity".to_string();
+    }
+    if file_name.contains("tool") {
+        return "tool-guidance".to_string();
+    }
+    if file_name.contains("channel") {
+        return "channel".to_string();
+    }
+    if file_name == "config.json"
+        || file_name == "config.yaml"
+        || file_name == "config.yml"
+        || file_name == "config.toml"
+    {
+        return "runtime-config".to_string();
+    }
+    "unknown".to_string()
 }
 
 pub(crate) fn is_config_file(path: &Path) -> bool {
@@ -440,6 +492,12 @@ mod tests {
             .config_paths
             .iter()
             .any(|path| path.file_name().and_then(|name| name.to_str()) == Some("auth.json")));
+        assert!(records[0].config_files.iter().any(|file| {
+            file.path.file_name().and_then(|name| name.to_str()) == Some("auth.json")
+                && file.role == "secret-file"
+                && file.sensitive
+                && file.skipped
+        }));
         assert!(!records[0]
             .config_paths
             .iter()

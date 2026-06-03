@@ -118,12 +118,22 @@ pub struct ScanWarning {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConfigFileMetadata {
+    pub path: PathBuf,
+    pub role: String,
+    pub sensitive: bool,
+    pub skipped: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentScanRecord {
     pub id: String,
     pub runtime: AgentRuntime,
     pub name: String,
     pub root_path: PathBuf,
     pub config_paths: Vec<PathBuf>,
+    pub config_files: Vec<ConfigFileMetadata>,
     pub personality_files: Vec<PathBuf>,
     pub skill_paths: Vec<PathBuf>,
     pub provider_summary: ProviderSummary,

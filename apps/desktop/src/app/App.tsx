@@ -59,6 +59,13 @@ type ModelSummary = {
   fallbackModel?: string | null;
 };
 
+type ConfigFileEntry = {
+  path: string;
+  role: string;
+  sensitive: boolean;
+  skipped: boolean;
+};
+
 type ManagedAgent = {
   id: string;
   product: RuntimeProduct;
@@ -69,6 +76,7 @@ type ManagedAgent = {
   configRoot: string;
   workspaceOrProfilePath: string;
   effectiveCwd?: string | null;
+  configFiles: ConfigFileEntry[];
   providerSummary?: ProviderSummary | null;
   modelSummary?: ModelSummary | null;
   permissionSummary?: { status: string } | null;
@@ -677,10 +685,6 @@ function InstalledDashboard({
     <>
       <section className="runtimeStatus" aria-label={`${runtime.label} runtime status`}>
         <div>
-          <span>CLI</span>
-          <strong>{selectedAgent?.launchCommand ?? "未选择 Agent/Profile"}</strong>
-        </div>
-        <div>
           <span>Version</span>
           <strong>{runtime.version ?? "未读取到"}</strong>
           {runtime.updateAvailable ? (
@@ -694,32 +698,9 @@ function InstalledDashboard({
             </button>
           ) : null}
         </div>
-        <div>
-          <span>Agent目录</span>
-          <strong>{selectedAgent?.workspaceOrProfilePath ?? runtime.homeDir ?? "未检测到"}</strong>
-        </div>
-        <div>
-          <span>Gateway</span>
-          <strong>{formatGateway(runtime.gatewayRunning)}</strong>
-        </div>
-        <div>
-          <span>Confidence</span>
-          <strong>{runtime.detectionConfidence}</strong>
-        </div>
       </section>
-      {runtime.warnings.length > 0 ? (
-        <section className="runtimeWarnings" aria-label={`${runtime.label} runtime warnings`}>
-          {runtime.warnings.map((warning) => (
-            <span key={warning}>{warning}</span>
-          ))}
-        </section>
-      ) : null}
-      {runtimeUpdateState === "success" || runtimeUpdateState === "error" ? (
-        <section
-          className={
-            runtimeUpdateState === "error" ? "runtimeUpdateNotice runtimeUpdateNoticeWarning" : "runtimeUpdateNotice"
-          }
-        >
+      {runtimeUpdateState === "error" ? (
+        <section className="runtimeUpdateNotice runtimeUpdateNoticeWarning">
           {runtimeUpdateMessage}
         </section>
       ) : null}
@@ -791,61 +772,182 @@ function InstalledDashboard({
         </article>
 
         <article className="operationPane">
-          <div>
-            <p className="eyebrow">OperationPane</p>
-            <h3>{selectedOperationNode.label}</h3>
-          </div>
-          <dl className="paneMeta">
-            <div>
-              <dt>Runtime</dt>
-              <dd>{runtime.label}</dd>
-            </div>
-            <div>
-              <dt>{runtime.entityLabel}</dt>
-              <dd>{selectedAgent?.displayName ?? "未选择"}</dd>
-            </div>
-            <div>
-              <dt>Operation</dt>
-              <dd>{selectedOperationNode.label}</dd>
-            </div>
-          </dl>
-          {selectedAgent ? (
-            <dl className="paneMeta paneMetaWide">
-              <div>
-                <dt>Path</dt>
-                <dd>{selectedAgent.workspaceOrProfilePath}</dd>
-              </div>
-              <div>
-                <dt>Confidence</dt>
-                <dd>{selectedAgent.confidence}</dd>
-              </div>
-              <div>
-                <dt>Skills / Channels</dt>
-                <dd>
-                  {selectedAgent.skillCount} / {selectedAgent.channelCount}
-                </dd>
-              </div>
-            </dl>
-          ) : null}
-          <p>{selectedOperationNode.description}</p>
-          {selectedAgent && selectedAgent.warnings.length > 0 ? (
-            <div className="agentWarnings">
-              {selectedAgent.warnings.slice(0, 4).map((warning) => (
-                <span key={`${selectedAgent.id}:${warning.code}:${warning.message}`}>{warning.message}</span>
-              ))}
-            </div>
-          ) : null}
-          <div className="safetyList">
-            <span>只读占位</span>
-            <span>未调用后端命令</span>
-            <span>默认不读取会话/记忆全文</span>
-            <span>不迁移 secret / token / pairing state</span>
-          </div>
+          {selectedOperation === "basic" ? (
+            <BasicSettingsPane runtime={runtime} selectedAgent={selectedAgent} />
+          ) : (
+            <PlaceholderOperationPane
+              runtime={runtime}
+              selectedAgent={selectedAgent}
+              selectedOperationNode={selectedOperationNode}
+            />
+          )}
         </article>
       </section>
     </>
   );
 }
+
+function BasicSettingsPane({
+  runtime,
+  selectedAgent,
+}: {
+  runtime: DashboardRuntime;
+  selectedAgent: ManagedAgent | null;
+}) {
+  if (!selectedAgent) {
+    return (
+      <>
+        <div className="operationTitleRow">
+          <div>
+            <p className="eyebrow">Basic Settings</p>
+            <h3>基础设置</h3>
+          </div>
+        </div>
+        <div className="emptyDetailState">
+          <strong>未选择 {runtime.entityLabel}</strong>
+          <span>请选择左侧扫描到的 agent/profile 后查看只读基础详情。</span>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="operationTitleRow">
+        <div>
+          <p className="eyebrow">Basic Settings</p>
+          <h3>{selectedAgent.displayName}</h3>
+        </div>
+        <button
+          className="trashIconButton"
+          type="button"
+          disabled
+          aria-label="删除/回收"
+          title="删除/回收尚未实现"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M3 6h18" />
+            <path d="M8 6V4h8v2" />
+            <path d="M6 6l1 15h10l1-15" />
+            <path d="M10 11v6" />
+            <path d="M14 11v6" />
+          </svg>
+        </button>
+      </div>
+
+      <section className="basicSettingsForm" aria-label="Basic settings">
+        <label>
+          <span>名称</span>
+          <input type="text" value={selectedAgent.displayName} readOnly />
+        </label>
+        <label>
+          <span>描述（只在 AgentDock 中生效）</span>
+          <textarea value={selectedAgent.description ?? ""} readOnly placeholder="未设置" />
+        </label>
+      </section>
+
+      <section className="detailSection" aria-label="Basic runtime metadata">
+        <h4>基础信息</h4>
+        <dl className="detailGrid">
+          <DetailItem label="运行时类型" value={runtime.label} />
+          <DetailItem label="Agent/Profile kind" value={selectedAgent.agentKind} />
+          <DetailItem label="Agent/Profile ID" value={selectedAgent.id} />
+          <DetailItem label="CLI-agent启动命令" value={selectedAgent.launchCommand ?? "未扫描"} />
+          <div>
+            <dt>Agent环境变量路径</dt>
+            <dd className="envPathDetailValue">
+              <span>{agentEnvPath(selectedAgent)}</span>
+              <button
+                className="envEditIconButton"
+                type="button"
+                disabled
+                aria-label="编辑 Agent 环境变量"
+                title="编辑 Agent 环境变量尚未实现"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
+              </button>
+            </dd>
+          </div>
+          <div>
+            <dt>Gateway检查</dt>
+            <dd className="gatewayDetailValue">
+              <span>{formatGateway(runtime.gatewayRunning)}</span>
+              <button
+                className="gatewayReloadButton"
+                type="button"
+                disabled
+                aria-label="重启 gateway"
+                title="重启 gateway 尚未实现"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M20 6v5h-5" />
+                  <path d="M4 18v-5h5" />
+                  <path d="M19 11a7 7 0 0 0-12.2-4.7L4 9" />
+                  <path d="M5 13a7 7 0 0 0 12.2 4.7L20 15" />
+                </svg>
+              </button>
+            </dd>
+          </div>
+          <DetailItem label="Confidence" value={selectedAgent.confidence} />
+          <DetailItem label="最近修改时间" value={formatLastModified(selectedAgent.lastModified)} />
+        </dl>
+      </section>
+    </>
+  );
+}
+
+function PlaceholderOperationPane({
+  runtime,
+  selectedAgent,
+  selectedOperationNode,
+}: {
+  runtime: DashboardRuntime;
+  selectedAgent: ManagedAgent | null;
+  selectedOperationNode: { id: OperationNode; label: string; description: string };
+}) {
+  return (
+    <>
+      <div>
+        <p className="eyebrow">OperationPane</p>
+        <h3>{selectedOperationNode.label}</h3>
+      </div>
+      <dl className="paneMeta">
+        <div>
+          <dt>Runtime</dt>
+          <dd>{runtime.label}</dd>
+        </div>
+        <div>
+          <dt>{runtime.entityLabel}</dt>
+          <dd>{selectedAgent?.displayName ?? "未选择"}</dd>
+        </div>
+        <div>
+          <dt>Operation</dt>
+          <dd>{selectedOperationNode.label}</dd>
+        </div>
+      </dl>
+      <p>{selectedOperationNode.description}</p>
+      <div className="safetyList">
+        <span>只读占位</span>
+        <span>未调用后端命令</span>
+        <span>默认不读取会话/记忆全文</span>
+        <span>不迁移 secret / token / pairing state</span>
+      </div>
+    </>
+  );
+}
+
+function DetailItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
+
 
 function NotInstalledDashboard({ runtime }: { runtime: DashboardRuntime }) {
   return (
@@ -1058,6 +1160,7 @@ function normalizeManagedAgents(agents: ManagedAgent[]): ManagedAgent[] {
     .map((agent) => ({
       ...agent,
       channelCount: agent.channelCount ?? 0,
+      configFiles: agent.configFiles ?? [],
       skillCount: agent.skillCount ?? 0,
       warnings: agent.warnings ?? [],
     }));
@@ -1147,6 +1250,7 @@ function browserFixtureAgent(product: RuntimeProduct, item: string): ManagedAgen
     configRoot: `/mock/home/${product === "openclaw" ? ".openclaw" : ".hermes"}`,
     workspaceOrProfilePath: `/mock/home/${product === "openclaw" ? ".openclaw/agents" : ".hermes/profiles"}/${item}`,
     effectiveCwd: null,
+    configFiles: [],
     providerSummary: null,
     modelSummary: null,
     permissionSummary: null,
@@ -1187,6 +1291,23 @@ function formatGateway(gatewayRunning?: boolean | null) {
     return "未运行";
   }
   return "未检查";
+}
+
+function agentEnvPath(agent: ManagedAgent) {
+  return `${agent.workspaceOrProfilePath}/.env`;
+}
+
+function formatLastModified(value?: string | null) {
+  if (!value) {
+    return "未扫描";
+  }
+
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds)) {
+    return value;
+  }
+
+  return new Date(seconds * 1000).toLocaleString();
 }
 
 function hasTauriCommandBridge() {

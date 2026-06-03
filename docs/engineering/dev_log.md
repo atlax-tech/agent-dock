@@ -1,5 +1,266 @@
 # AgentDock Development Log
 
+## 2026-06-03 - Basic Settings Env Path and Gateway Detection
+
+### Task Goal
+
+Remove the duplicated Agent directory field from Basic Settings, show the
+selected agent/profile env path instead, and replace the gateway placeholder
+with read-only local detection.
+
+### Files Changed
+
+- `apps/desktop/src-tauri/src/commands/runtime_detection.rs`
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Changed Basic Settings `Agent目录` to `Agent环境变量路径`.
+- The env path displays the selected agent/profile `.env` candidate path.
+- Added a disabled edit icon next to the env path; env editing is not
+  implemented.
+- Runtime detection now fills `gatewayRunning` with a real boolean from local
+  read-only process inspection instead of always returning `None`.
+- Added gateway process matching coverage to avoid treating normal chat/profile
+  commands as gateway processes.
+
+### Boundary Confirmation
+
+- No env file body is read.
+- No env editing behavior was implemented.
+- No gateway restart behavior was implemented.
+- No delete/recycle behavior was implemented.
+- No Provider, Personality, Sessions, Memories, Skills, Permissions, Channels,
+  Scheduled Tasks, Install, Uninstall, or Migration behavior was implemented.
+- No OpenClaw or Hermes config files are written.
+- No session or memory full content is read.
+- No secret plaintext is read or displayed.
+- PRD/SPEC/UI_UX product documents were not modified.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  66 Rust tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `git diff --check`: passed.
+- `git status --short`: reviewed.
+
+### Risks
+
+- Gateway detection is a conservative process-command-line check for the
+  selected runtime plus gateway/server/daemon markers. If OpenClaw or Hermes
+  uses a different official process name, detection may report `未运行` until
+  the adapter is updated.
+- The env path is a candidate location and does not imply the file exists.
+
+### Next Step
+
+Review official gateway process/status commands and replace process-name
+matching with runtime-specific status checks when a safe timeout-bound command
+wrapper is available.
+
+## 2026-06-03 - Basic Settings Status Layout Adjustment
+
+### Task Goal
+
+Adjust Dashboard runtime status and Basic Settings layout so agent-specific
+runtime metadata lives in the selected agent/profile Basic Settings pane.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Removed environment variable references from Basic Settings.
+- Reduced the installed runtime outer status area to Version and the existing
+  update button logic only.
+- Removed the outer status card/container styling so Version renders directly
+  below the runtime switcher.
+- Moved CLI launch command, Agent directory, Gateway check, and Confidence into
+  Basic Settings basic information.
+- Kept update button hidden when no update is available; after update succeeds,
+  existing code hides the button and triggers runtime detection plus agent
+  rescan.
+- Added a small borderless reload icon next to Gateway check as the documented
+  restart-gateway entry.
+- Added a red trash icon at the Basic Settings title row as the documented
+  delete/recycle entry.
+
+### Boundary Confirmation
+
+- Gateway restart and delete/recycle icons are disabled placeholders because no
+  safe mutation lifecycle has been implemented for those actions yet.
+- No Provider, Personality, Sessions, Memories, Skills, Permissions, Channels,
+  Scheduled Tasks, Install, Uninstall, or Migration behavior was implemented.
+- No backend mutation command is called by Basic Settings.
+- No OpenClaw or Hermes config files are written.
+- No session or memory full content is read.
+- No secret plaintext is read or displayed.
+- PRD/SPEC/UI_UX product documents were not modified.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  65 Rust tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `git diff --check`: passed.
+- `git status --short`: reviewed.
+
+### Risks
+
+- Restart gateway and delete/recycle are visually placed but intentionally not
+  executable until a reviewed backend command and safety flow exists.
+- Version remains the only outer runtime status item; runtime warnings are no
+  longer shown in the installed outer status area.
+
+### Next Step
+
+Implement a reviewed restart-gateway command with explicit confirmation, or
+continue refining Basic Settings save behavior for name/description.
+
+## 2026-06-03 - Basic Settings OperationPane Contract Correction
+
+### Task Goal
+
+Constrain Dashboard Basic Settings to the document-defined OperationPane
+structure for the selected OpenClaw agent or Hermes profile.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Basic Settings now shows only the allowed structure for this slice:
+  name, AgentDock-local description, runtime type, agent/profile kind,
+  agent/profile id, last modified time, environment variable references, and
+  disabled restart/delete-recycle entries.
+- Removed Basic Settings display of gateway state, config file metadata,
+  warnings, skills/channels/session/memory counts, create, copy, restore,
+  edit-env, and external editor actions.
+- Gateway state remains in the outer runtime status strip.
+- The Agent/Profile tree keeps the existing disabled `+ Add Agent/Profile`
+  location; Basic Settings no longer exposes create actions.
+
+### Boundary Confirmation
+
+- No Provider, Personality, Sessions, Memories, Skills, Permissions, Channels,
+  Scheduled Tasks, Install, Uninstall, or Migration behavior was implemented.
+- No backend mutation command is called by Basic Settings.
+- No OpenClaw or Hermes config files are written.
+- No session or memory full content is read.
+- No secret plaintext is read or displayed.
+- PRD/SPEC/UI_UX product documents were not modified.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  65 Rust tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `git diff --check`: passed.
+
+### Risks
+
+- Name and description fields are rendered read-only in this slice because the
+  safe mutation lifecycle for saving Basic Settings is not implemented yet.
+- Environment variable references are currently inferred from safe redacted
+  provider metadata fields only; no env file body is read.
+
+### Next Step
+
+Implement a reviewed Basic Settings mutation plan for name/description only, or
+add a runtime-specific environment-reference metadata slice.
+
+## 2026-06-03 - Basic Settings Read-only Detail Panel
+
+### Task Goal
+
+Implement Phase 2 Basic Settings as a real read-only metadata panel for the
+selected OpenClaw agent or Hermes profile.
+
+### Files Changed
+
+- `apps/desktop/src-tauri/src/scanner/types.rs`
+- `apps/desktop/src-tauri/src/scanner/mod.rs`
+- `apps/desktop/src-tauri/src/scanner/openclaw.rs`
+- `apps/desktop/src-tauri/src/scanner/hermes.rs`
+- `apps/desktop/src-tauri/src/commands/agent_profiles.rs`
+- `apps/desktop/src-tauri/src/commands/personality.rs`
+- `apps/desktop/src-tauri/src/commands/providers.rs`
+- `apps/desktop/src-tauri/src/db/mod.rs`
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added read-only detected config file metadata to scanned agent/profile
+  results: path, role, sensitive, and skipped.
+- Secret-bearing config files are now surfaced only as sensitive/skipped
+  metadata and still do not enter config parsing.
+- Basic Settings now shows selected agent/profile identity, runtime, kind, id,
+  config root, workspace/profile path, effective cwd, last modified,
+  confidence, gateway status, skills/channels counts, session/memory metadata
+  status, config file metadata, and scan warnings.
+- Added a clear empty state when no agent/profile is selected.
+- Kept create, copy, delete, restore, env edit, editor, and gateway restart
+  controls disabled.
+
+### Boundary Confirmation
+
+- No create, copy, delete, restore, install, uninstall, migration, Provider,
+  Permission, Channel, Scheduled Task, session detail, memory detail, env edit,
+  editor, gateway restart, backup, trash, account, telemetry, or network
+  behavior was added.
+- No OpenClaw or Hermes config files are written.
+- No session or memory full content is read.
+- No secret-bearing file body is read for detected config file metadata.
+- No `hermes profile list` call was added.
+
+### Tests Added / Updated
+
+- Added managed-agent coverage proving skipped secret config metadata is
+  serialized without leaking secret values.
+- Updated scanner coverage to assert `auth.json` appears only as
+  sensitive/skipped `secret-file` metadata and is not included in parsed config
+  paths.
+- Updated legacy test fixtures for the additive `config_files` scan field.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  65 Rust tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `git diff --check`: passed.
+- `git status --short`: reviewed.
+
+### Risks
+
+- Config file `role` is currently a conservative filename/path metadata hint,
+  not a full official runtime semantic map.
+- Session and memory counts remain `未扫描` because this slice does not add safe
+  metadata counting for private runtime directories.
+
+### Next Step
+
+Add runtime-specific safe metadata counting for sessions and memory, or start a
+reviewed Personality read-only file metadata slice.
+
 ## 2026-06-03 - Hermes Profile ID Scan Fix
 
 ### Task Goal

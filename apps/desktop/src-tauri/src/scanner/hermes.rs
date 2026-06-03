@@ -7,8 +7,8 @@ use super::ignore::is_private_runtime_dir;
 use super::redaction::collect_secret_fields;
 use super::types::*;
 use super::{
-    collect_config_files, find_personality_files, find_skill_paths, health_status, now_timestamp,
-    parse_config, warning, ScannerError,
+    collect_config_file_metadata, find_personality_files, find_skill_paths, health_status,
+    now_timestamp, parse_config, warning, ScannerError,
 };
 
 pub fn scan_root(root: &Path) -> Result<Vec<AgentScanRecord>, ScannerError> {
@@ -48,7 +48,12 @@ fn collect_child_dirs(root: &Path, candidates: &mut Vec<PathBuf>) -> Result<(), 
 
 fn scan_profile_dir(root: &Path) -> Option<AgentScanRecord> {
     let mut warnings = Vec::new();
-    let config_paths = collect_config_files(root, &mut warnings);
+    let config_files = collect_config_file_metadata(root, &mut warnings);
+    let config_paths: Vec<_> = config_files
+        .iter()
+        .filter(|file| !file.skipped)
+        .map(|file| file.path.clone())
+        .collect();
     let mut provider_summary = ProviderSummary::default();
     let mut model_summary = ModelSummary::default();
     let mut channel_summary = ChannelSummary::default();
@@ -145,6 +150,7 @@ fn scan_profile_dir(root: &Path) -> Option<AgentScanRecord> {
         name,
         root_path: root.to_path_buf(),
         config_paths,
+        config_files,
         personality_files: find_personality_files(root),
         skill_paths: find_skill_paths(root),
         provider_summary,

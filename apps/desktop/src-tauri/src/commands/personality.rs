@@ -755,6 +755,7 @@ mod tests {
             name: "Fixture Agent".to_string(),
             root_path: root.to_path_buf(),
             config_paths: Vec::new(),
+            config_files: Vec::new(),
             personality_files: Vec::new(),
             skill_paths: Vec::new(),
             provider_summary: ProviderSummary::default(),

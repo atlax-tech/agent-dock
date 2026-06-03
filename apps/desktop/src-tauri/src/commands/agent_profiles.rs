@@ -9,7 +9,8 @@ use serde::Serialize;
 use crate::scanner::{
     self,
     types::{
-        AgentRuntime, AgentScanRecord, ModelSummary, ProviderSummary, ScanWarning, WarningSeverity,
+        AgentRuntime, AgentScanRecord, ConfigFileMetadata, ModelSummary, ProviderSummary,
+        ScanWarning, WarningSeverity,
     },
     ScannerError,
 };
@@ -31,6 +32,15 @@ pub struct PermissionSummary {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConfigFileEntry {
+    path: String,
+    role: String,
+    sensitive: bool,
+    skipped: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ManagedAgent {
     id: String,
     product: String,
@@ -41,6 +51,7 @@ pub struct ManagedAgent {
     config_root: String,
     workspace_or_profile_path: String,
     effective_cwd: Option<String>,
+    config_files: Vec<ConfigFileEntry>,
     provider_summary: Option<ProviderSummary>,
     model_summary: Option<ModelSummary>,
     permission_summary: Option<PermissionSummary>,
@@ -176,6 +187,7 @@ fn managed_agent_from_record(record: AgentScanRecord, config_root: &Path) -> Man
         config_root: config_root.display().to_string(),
         workspace_or_profile_path: record.root_path.display().to_string(),
         effective_cwd: None,
+        config_files: config_file_entries(record.config_files),
         provider_summary: Some(record.provider_summary),
         model_summary: Some(record.model_summary),
         permission_summary: None,
@@ -187,6 +199,18 @@ fn managed_agent_from_record(record: AgentScanRecord, config_root: &Path) -> Man
         warnings,
         confidence: confidence.to_string(),
     }
+}
+
+fn config_file_entries(files: Vec<ConfigFileMetadata>) -> Vec<ConfigFileEntry> {
+    files
+        .into_iter()
+        .map(|file| ConfigFileEntry {
+            path: file.path.display().to_string(),
+            role: file.role,
+            sensitive: file.sensitive,
+            skipped: file.skipped,
+        })
+        .collect()
 }
 
 fn launch_command_for_record(record: &AgentScanRecord) -> String {
@@ -513,6 +537,43 @@ mod tests {
         assert!(!rendered.contains("private session text"));
         assert!(!rendered.contains("private memory text"));
         assert!(rendered.contains("secret_fields_redacted"));
+        assert!(rendered.contains(r#""configFiles""#));
+    }
+
+    #[test]
+    fn managed_agent_config_files_include_skipped_secret_metadata_only() {
+        let temp = tempfile::tempdir().expect("temp home");
+        let agent = temp.path().join("home/.openclaw/agents/config-metadata");
+        write_config(
+            agent.join("config.json"),
+            r#"{"name":"Config Metadata","provider":"openai","model":{"default":"gpt-safe"}}"#,
+        );
+        write_config(
+            agent.join("auth.json"),
+            r#"{"api_key":"AUTH_METADATA_CANARY_012"}"#,
+        );
+
+        let agents = scan_managed_agents_with_options(&ScanOptions {
+            home_dir: temp.path().join("home"),
+            hermes_home: None,
+        })
+        .expect("scan");
+        let rendered = serde_json::to_string(&agents).expect("serialize");
+        let agent = agents
+            .iter()
+            .find(|agent| agent.display_name == "Config Metadata")
+            .expect("managed agent");
+
+        assert!(agent.config_files.iter().any(|file| {
+            file.path.ends_with("config.json") && !file.sensitive && !file.skipped
+        }));
+        assert!(agent.config_files.iter().any(|file| {
+            file.path.ends_with("auth.json")
+                && file.role == "secret-file"
+                && file.sensitive
+                && file.skipped
+        }));
+        assert!(!rendered.contains("AUTH_METADATA_CANARY_012"));
     }
 
     fn write_config(path: PathBuf, content: &str) {

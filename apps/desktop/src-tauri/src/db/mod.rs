@@ -427,6 +427,7 @@ pub fn load_agent_records(connection: &Connection) -> Result<Vec<AgentScanRecord
             name: row.get(2)?,
             root_path: PathBuf::from(row.get::<_, String>(3)?),
             config_paths: json_paths(row.get::<_, String>(4)?),
+            config_files: Vec::new(),
             personality_files: json_paths(row.get::<_, String>(5)?),
             skill_paths: json_paths(row.get::<_, String>(6)?),
             provider_summary: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),

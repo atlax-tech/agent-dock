@@ -94,6 +94,7 @@ fn detect_runtime(
         .unwrap_or(false);
     let home_dir = home_candidates.into_iter().find(|path| path.is_dir());
     let config_path = home_dir.as_ref().filter(|path| path.is_dir()).cloned();
+    let gateway_running = detect_gateway_process(product);
 
     let confidence = confidence(cli_path.is_some(), version.is_some(), config_path.is_some());
     let mut warnings = Vec::new();
@@ -131,7 +132,7 @@ fn detect_runtime(
         update_command: Some(format!("{cli_name} update")),
         home_dir: home_dir.map(|path| path.display().to_string()),
         config_path: config_path.map(|path| path.display().to_string()),
-        gateway_running: None,
+        gateway_running: Some(gateway_running),
         detection_confidence: confidence.to_string(),
         warnings,
     }
@@ -241,6 +242,29 @@ fn version_reports_update_available(raw: &str) -> bool {
         || normalized.contains("有新版本")
 }
 
+fn detect_gateway_process(product: RuntimeProduct) -> bool {
+    let Ok(output) = Command::new("ps").args(["-axo", "command="]).output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+
+    let commands = String::from_utf8_lossy(&output.stdout);
+    commands
+        .lines()
+        .any(|command| command_line_matches_gateway(product, command))
+}
+
+fn command_line_matches_gateway(product: RuntimeProduct, command: &str) -> bool {
+    let normalized = command.to_ascii_lowercase();
+    normalized.contains(product.id())
+        && ["gateway", "server", "daemon"]
+            .iter()
+            .any(|marker| normalized.contains(marker))
+        && !normalized.contains("agentdock")
+}
+
 impl RuntimeProduct {
     fn id(self) -> &'static str {
         match self {
@@ -329,6 +353,26 @@ mod tests {
             "Hermes Agent v0.15.1 Update available: run 'hermes update'"
         ));
         assert!(!version_reports_update_available("openclaw 1.2.3"));
+    }
+
+    #[test]
+    fn gateway_process_match_is_product_and_gateway_scoped() {
+        assert!(command_line_matches_gateway(
+            RuntimeProduct::Hermes,
+            "/usr/local/bin/hermes gateway start"
+        ));
+        assert!(command_line_matches_gateway(
+            RuntimeProduct::OpenClaw,
+            "openclaw server --port 3000"
+        ));
+        assert!(!command_line_matches_gateway(
+            RuntimeProduct::Hermes,
+            "hermes --profile auto-business chat"
+        ));
+        assert!(!command_line_matches_gateway(
+            RuntimeProduct::Hermes,
+            "openclaw gateway start"
+        ));
     }
 
     #[test]
