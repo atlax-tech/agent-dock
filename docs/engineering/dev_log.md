@@ -736,3 +736,66 @@ AgentDock 保持 local-only 桌面仪表盘。本轮不实现 Web UI 管理、Sa
 - 添加桌面运行时 UI 测试框架
 - 在迁移或 skill/channel 变更阶段前扩展真实 OpenClaw/Hermes provider schema fixtures
 - 考虑恢复时提供重命名选项而非直接 block
+
+## 2026-06-03 - 001 Frontend v0.3 Shell Read-Only
+
+### Task Goal
+
+Implement the first safe vertical rebuild slice:
+`001-frontend-v03-shell-readonly`.
+
+This round realigns the visible desktop frontend with the local v0.3 product
+mind while keeping the change frontend-only and read-only.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Replaced the visible phase-era scanner/admin shell with a v0.3 read-only
+  shell.
+- Left Dock now exposes only `Dashboard`, `Migration`, and `Settings`.
+- Added local placeholder controls for language and theme.
+- Added Dashboard runtime switcher for `OpenClaw` and `Hermes` without invoking
+  scans or backend commands.
+- Added read-only placeholders for not-installed status, installed status,
+  agent/profile tree, and right-side operation pane.
+- Added operation node placeholders for Basic, Provider, Personality, Sessions,
+  Memories, Skills, Permissions, Channels, and Scheduled Tasks.
+- Added Migration placeholder with explicit preview and no-secret-migration
+  framing.
+- Added Settings placeholder with local-first privacy framing.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed,
+  52 tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `rg -n "scan_default_candidates|scan_fixture_roots|scan_selected_root|apply_create_agent|apply_create_profile|apply_duplicate_agent|apply_delete_agent|apply_model_provider_update|apply_personality_update|restore_personality_backup|apply_restore_trash_item" apps/desktop/src/app/App.tsx || true`: no output.
+
+### Result
+
+The visible app shell is now aligned to the v0.3 first-screen structure and no
+longer exposes old top-level Scan, Agents, or Trash flows. Opening the frontend
+does not invoke scanner, provider, lifecycle, personality, backup, trash, or
+migration commands.
+
+### Risks
+
+- This slice intentionally hides the old scanner/admin UI, but the backend
+  command modules still exist for later audit or replacement.
+- The new dashboard is placeholder-only and does not yet show real install
+  status, runtime confidence, provider, permissions, scheduled tasks, channels,
+  sessions, memories, or skills metadata.
+- No manual desktop visual QA has been performed in this round.
+
+### Next Step
+
+Plan the next vertical slice: either split the frontend scaffold into stable
+route/component boundaries or add a read-only backend view model for runtime
+install status without scanning real OpenClaw/Hermes home directories.
