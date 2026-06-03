@@ -39,6 +39,9 @@ type RuntimeInstallStatus = {
 };
 
 type DashboardRuntime = MockRuntime & RuntimeInstallStatus;
+type TauriBridgeWindow = Window & {
+  __TAURI_INTERNALS__?: unknown;
+};
 
 const dockRoutes: { id: DockRoute; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
@@ -762,5 +765,9 @@ function formatGateway(gatewayRunning?: boolean | null) {
 }
 
 function hasTauriCommandBridge() {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return Boolean((window as TauriBridgeWindow).__TAURI_INTERNALS__);
 }

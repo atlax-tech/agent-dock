@@ -1,5 +1,42 @@
 # AgentDock Development Log
 
+## 2026-06-03 - Runtime Detection Tauri Bridge Repair
+
+### Task Goal
+
+Repair the frontend Tauri bridge guard used by Runtime Detection so TypeScript
+checks remain stable after the runtime detection slice.
+
+### Repair Reason
+
+`App.tsx` calls `hasTauriCommandBridge()` before invoking
+`detect_runtime_install_statuses`. The helper existed in this working tree, but
+the bridge check used a minimal global-property probe. This repair makes the
+guard explicit and typed so future TypeScript checks do not depend on an
+implicitly shaped `window` object.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `docs/engineering/dev_log.md`
+
+### Behavior
+
+- Tauri desktop runtime still prefers `detect_runtime_install_statuses`.
+- Browser preview still uses local fallback / fixture runtime status.
+- No install, uninstall, migration, Provider, permission, channel, scheduled
+  task, session, memory, skill, secret migration, cloud, account, or telemetry
+  behavior was added.
+
+### Validation Performed
+
+- Pending in this repair entry until final validation command set completes.
+
+### Risks
+
+- Low. The change only hardens frontend bridge detection and does not alter the
+  backend runtime detection command or product behavior.
+
 ## 2026-06-03 - Phase 1 Runtime Detection Read-only
 
 ### Task Goal
