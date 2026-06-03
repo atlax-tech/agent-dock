@@ -52,7 +52,7 @@ fn scan_profile_dir(root: &Path) -> Option<AgentScanRecord> {
     let mut provider_summary = ProviderSummary::default();
     let mut model_summary = ModelSummary::default();
     let mut channel_summary = ChannelSummary::default();
-    let mut name = root.file_name()?.to_string_lossy().to_string();
+    let name = root.file_name()?.to_string_lossy().to_string();
 
     if config_paths.is_empty() {
         warnings.push(warning(
@@ -74,7 +74,6 @@ fn scan_profile_dir(root: &Path) -> Option<AgentScanRecord> {
 
         merge_metadata(
             &value,
-            &mut name,
             &mut provider_summary,
             &mut model_summary,
             &mut channel_summary,
@@ -159,16 +158,10 @@ fn scan_profile_dir(root: &Path) -> Option<AgentScanRecord> {
 
 fn merge_metadata(
     value: &Value,
-    name: &mut String,
     provider_summary: &mut ProviderSummary,
     model_summary: &mut ModelSummary,
     channel_summary: &mut ChannelSummary,
 ) {
-    if let Some(config_name) =
-        string_at(value, &["name"]).or_else(|| string_at(value, &["profile", "name"]))
-    {
-        *name = config_name.to_string();
-    }
     provider_summary.provider = provider_summary
         .provider
         .clone()

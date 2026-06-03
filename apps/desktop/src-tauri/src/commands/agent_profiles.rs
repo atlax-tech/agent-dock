@@ -37,6 +37,7 @@ pub struct ManagedAgent {
     display_name: String,
     description: Option<String>,
     agent_kind: String,
+    launch_command: String,
     config_root: String,
     workspace_or_profile_path: String,
     effective_cwd: Option<String>,
@@ -68,8 +69,13 @@ impl ScanOptions {
 }
 
 #[tauri::command]
-pub fn scan_managed_agents() -> Result<Vec<ManagedAgent>, String> {
-    scan_managed_agents_with_options(&ScanOptions::from_env()).map_err(|error| error.to_string())
+pub async fn scan_managed_agents() -> Result<Vec<ManagedAgent>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        scan_managed_agents_with_options(&ScanOptions::from_env())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 fn scan_managed_agents_with_options(
@@ -85,7 +91,6 @@ fn scan_managed_agents_with_options(
 fn scan_openclaw(options: &ScanOptions) -> Result<Vec<ManagedAgent>, ScannerError> {
     let openclaw_home = options.home_dir.join(".openclaw");
     let mut candidates = Vec::new();
-    push_if_dir(&mut candidates, openclaw_home.clone());
     push_if_dir(&mut candidates, openclaw_home.join("agents"));
     push_if_dir(&mut candidates, openclaw_home.join("workspace"));
 
@@ -146,6 +151,7 @@ fn scan_candidates(
 
 fn managed_agent_from_record(record: AgentScanRecord, config_root: &Path) -> ManagedAgent {
     let confidence = confidence_for_record(&record);
+    let launch_command = launch_command_for_record(&record);
     let mut warnings = warnings_from_scan(record.warnings);
     if confidence == "low" {
         warnings.push(RuntimeWarning {
@@ -166,6 +172,7 @@ fn managed_agent_from_record(record: AgentScanRecord, config_root: &Path) -> Man
             AgentRuntime::Hermes => "hermes-profile",
         }
         .to_string(),
+        launch_command,
         config_root: config_root.display().to_string(),
         workspace_or_profile_path: record.root_path.display().to_string(),
         effective_cwd: None,
@@ -179,6 +186,43 @@ fn managed_agent_from_record(record: AgentScanRecord, config_root: &Path) -> Man
         last_modified: last_modified(&record.root_path),
         warnings,
         confidence: confidence.to_string(),
+    }
+}
+
+fn launch_command_for_record(record: &AgentScanRecord) -> String {
+    match record.runtime {
+        AgentRuntime::OpenClaw => {
+            let agent_id = openclaw_agent_id(&record.root_path, &record.name);
+            format!("openclaw agent --agent {agent_id} --message \"<message>\"")
+        }
+        AgentRuntime::Hermes => {
+            let profile = shell_token(&record.name);
+            format!("hermes --profile {profile} chat")
+        }
+    }
+}
+
+fn openclaw_agent_id(root: &Path, display_name: &str) -> String {
+    if let Some(name) = root.file_name().and_then(|name| name.to_str()) {
+        if let Some(agent) = name.strip_prefix("workspace-") {
+            return shell_token(agent);
+        }
+        if name == "workspace" {
+            return "main".to_string();
+        }
+        return shell_token(name);
+    }
+    shell_token(display_name)
+}
+
+fn shell_token(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | ':'))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 }
 
@@ -312,6 +356,44 @@ mod tests {
             .iter()
             .filter(|agent| agent.product == "openclaw")
             .all(|agent| agent.agent_kind == "openclaw-agent"));
+        assert!(agents
+            .iter()
+            .any(|agent| agent.launch_command
+                == "openclaw agent --agent main --message \"<message>\""));
+        assert!(agents
+            .iter()
+            .any(|agent| agent.launch_command
+                == "openclaw agent --agent dev --message \"<message>\""));
+    }
+
+    #[test]
+    fn openclaw_home_is_discovery_source_not_managed_agent() {
+        let temp = tempfile::tempdir().expect("temp home");
+        let openclaw = temp.path().join("home/.openclaw");
+        write_config(
+            openclaw.join("workspace/config.json"),
+            r#"{"agent":{"name":"Workspace Only"}}"#,
+        );
+
+        let agents = scan_managed_agents_with_options(&ScanOptions {
+            home_dir: temp.path().join("home"),
+            hermes_home: None,
+        })
+        .expect("scan");
+        let rendered = serde_json::to_string(&agents).expect("serialize");
+
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].display_name, "Workspace Only");
+        assert_ne!(agents[0].display_name, ".openclaw");
+        assert_ne!(
+            agents[0].workspace_or_profile_path,
+            openclaw.display().to_string()
+        );
+        assert!(!rendered.contains(r#""displayName":".openclaw""#));
+        assert!(!rendered.contains(&format!(
+            r#""workspaceOrProfilePath":"{}""#,
+            openclaw.display()
+        )));
     }
 
     #[test]
@@ -345,6 +427,38 @@ mod tests {
         assert!(hermes
             .iter()
             .all(|agent| agent.agent_kind == "hermes-profile"));
+        assert!(hermes.iter().any(|agent| agent.display_name == "custom"));
+        assert!(!hermes
+            .iter()
+            .any(|agent| agent.display_name == "Custom Hermes"));
+        assert!(hermes
+            .iter()
+            .any(|agent| agent.launch_command == "hermes --profile custom chat"));
+    }
+
+    #[test]
+    fn hermes_profile_identity_uses_directory_not_config_name() {
+        let temp = tempfile::tempdir().expect("temp home");
+        write_config(
+            temp.path()
+                .join("home/.hermes/profiles/dev-agent/profile.json"),
+            r#"{"profile":{"name":"lsp"},"model":{"default":"xopglm51"}}"#,
+        );
+
+        let agents = scan_managed_agents_with_options(&ScanOptions {
+            home_dir: temp.path().join("home"),
+            hermes_home: None,
+        })
+        .expect("scan");
+        let hermes = agents
+            .iter()
+            .find(|agent| agent.product == "hermes")
+            .expect("hermes profile");
+
+        assert_eq!(hermes.display_name, "dev-agent");
+        assert_eq!(hermes.launch_command, "hermes --profile dev-agent chat");
+        assert!(hermes.workspace_or_profile_path.ends_with("/profiles/dev-agent"));
+        assert_ne!(hermes.display_name, "lsp");
     }
 
     #[test]
@@ -376,7 +490,7 @@ mod tests {
         let agent = temp.path().join("home/.openclaw/agents/private-safe");
         write_config(
             agent.join("config.json"),
-            r#"{"name":"Private Safe","api_key":"secret-api-value","channels":{"telegram":{"bot_token":"secret-token-value"}}}"#,
+            r#"{"name":"Private Safe","api_key":"API_CANARY_006","channels":{"telegram":{"bot_token":"BOT_CANARY_006"}}}"#,
         );
         write_text(
             agent.join("sessions/session.json"),
@@ -394,8 +508,8 @@ mod tests {
         .expect("scan");
         let rendered = serde_json::to_string(&agents).expect("serialize");
 
-        assert!(!rendered.contains("secret-api-value"));
-        assert!(!rendered.contains("secret-token-value"));
+        assert!(!rendered.contains("API_CANARY_006"));
+        assert!(!rendered.contains("BOT_CANARY_006"));
         assert!(!rendered.contains("private session text"));
         assert!(!rendered.contains("private memory text"));
         assert!(rendered.contains("secret_fields_redacted"));

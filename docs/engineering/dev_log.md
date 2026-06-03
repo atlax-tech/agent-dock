@@ -1,5 +1,371 @@
 # AgentDock Development Log
 
+## 2026-06-03 - Hermes Profile ID Scan Fix
+
+### Task Goal
+
+Fix Hermes profile scan identity so the Dashboard profile list, CLI launch
+command, and Agent directory point to the same real profile.
+
+### Files Changed
+
+- `apps/desktop/src-tauri/src/scanner/hermes.rs`
+- `apps/desktop/src-tauri/src/scanner/mod.rs`
+- `apps/desktop/src-tauri/src/commands/agent_profiles.rs`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Hermes scanner now keeps the profile directory name as the profile identity.
+- Hermes config `name` / `profile.name` no longer overrides Dashboard
+  `displayName`.
+- Launch commands now follow the same directory-derived profile id, avoiding
+  mismatches like `hermes --profile lsp chat` for
+  `~/.hermes/profiles/dev-agent`.
+
+### Boundary Confirmation
+
+- No `hermes profile list` call was added.
+- No Hermes or OpenClaw config files are written.
+- No create, copy, delete, restore, install, uninstall, migration, Provider,
+  Permission, Channel, Scheduled Task, session, memory, or secret behavior was
+  added.
+
+### Tests Added / Updated
+
+- Added `hermes_profile_identity_uses_directory_not_config_name`.
+- Updated Hermes fixture scan expectations to assert profile directory IDs
+  rather than config display names.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml hermes`: passed
+  with 4 filtered Hermes tests.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  64 Rust tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `git diff --check`: passed.
+- `git status --short`: reviewed.
+
+### Risks
+
+- If Hermes later exposes an official profile display alias distinct from the
+  profile id, it should be shown as secondary metadata, not as the scan identity.
+
+### Next Step
+
+Refresh the Dashboard scan and verify the visible Hermes list matches
+`~/.hermes/profiles/*` directory names.
+
+## 2026-06-03 - Dashboard Runtime Status Cleanup
+
+### Task Goal
+
+Clean up the installed runtime status strip so CLI, Version, and Agent directory
+fields reflect the selected OpenClaw agent or Hermes profile instead of
+repeating raw runtime paths or full CLI version banners.
+
+### Files Changed
+
+- `apps/desktop/src-tauri/src/commands/runtime_detection.rs`
+- `apps/desktop/src-tauri/src/commands/agent_profiles.rs`
+- `apps/desktop/src-tauri/src/lib.rs`
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Runtime detection now extracts a clean version number from CLI version output.
+- Runtime detection reports update availability only when the CLI version output
+  clearly contains update-available text.
+- Added an explicit user-triggered `update_runtime_product` Tauri command for
+  `openclaw update` and `hermes update`.
+- Managed agent scan results now include a runtime-specific launch command:
+  `openclaw agent --agent <id> --message "<message>"` for OpenClaw and
+  `hermes --profile <name> chat` for Hermes.
+- Dashboard status strip now shows the selected agent/profile launch command and
+  selected agent/profile directory.
+- Renamed `Home / config` to `Agent目录`.
+- Added a compact `有新版本可用` button in the Version cell when an update is
+  reported by detection.
+- Follow-up: after a user-triggered update succeeds, the Dashboard now hides the
+  update button immediately, shows only `升级完成`, and triggers a fresh runtime
+  detection pass instead of rendering raw update command output.
+
+### Source Confirmation
+
+- OpenClaw official CLI docs document `openclaw agent --agent <id>` for
+  targeting a configured agent and `openclaw update` for runtime updates.
+- Hermes official CLI docs document `hermes --profile <name>` / `-p <name>` for
+  selecting a profile, `hermes chat` for interactive agent use, and
+  `hermes update` for updates.
+
+### Boundary Confirmation
+
+- No create, copy, delete, restore, install, uninstall, migration, Provider,
+  Permission, Channel, Scheduled Task, session, memory, telemetry, account, or
+  background network behavior was added.
+- No OpenClaw or Hermes config files are written during detection or scan.
+- Update execution is available only after an explicit user click.
+- No `hermes profile list` call was added.
+
+### Tests Added / Updated
+
+- Added launch-command assertions for OpenClaw workspace candidates and Hermes
+  profiles.
+- Added clean version extraction and update availability parsing coverage.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  63 Rust tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `git diff --check`: passed.
+- `git status --short`: reviewed.
+- Follow-up validation for update UI state:
+  - `npm run check`: passed.
+  - `npm run build`: passed.
+  - `git diff --check`: passed.
+
+### Risks
+
+- OpenClaw launch command is a command template because the official agent
+  command requires a message body for an actual run.
+- Update availability depends on CLI version output text; if a runtime changes
+  wording, the button may not appear until the parser is updated.
+- `openclaw update` / `hermes update` may perform network and filesystem work
+  when the user explicitly clicks the button.
+
+### Next Step
+
+Add runtime-specific adapter documentation for command templates and update
+parsing once the Dashboard status behavior is accepted.
+
+## 2026-06-03 - Dashboard Rescan Button
+
+### Task Goal
+
+Add a compact reload button next to the runtime switcher and shorten the
+temporary background scan progress bar.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added a toolbar reload button immediately after the OpenClaw / Hermes switcher.
+- Clicking reload increments the existing background scan trigger and re-runs
+  the read-only `scan_managed_agents` command.
+- Disabled the reload button while a scan is already running.
+- Shortened the toolbar scan progress indicator so it no longer spans the full
+  red-box area.
+
+### Boundary Confirmation
+
+- No backend scan protocol changes.
+- No create, copy, delete, restore, install, uninstall, migration, Provider,
+  Permission, Channel, Scheduled Task, session, memory, or config write behavior
+  was added.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  62 Rust tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `git diff --check`: passed.
+- `git status --short`: reviewed.
+
+### Risks
+
+- The progress indicator remains indeterminate because the backend does not yet
+  emit exact progress events.
+
+### Next Step
+
+If exact progress is required, add a backend scan progress event protocol in a
+separate reviewed slice.
+
+## 2026-06-03 - Dashboard Scan Progress Toolbar
+
+### Task Goal
+
+Show temporary background scan progress in the Dashboard toolbar middle area.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added a transient scan progress state for the background agent/profile scan.
+- Displayed an animated progress bar between the runtime switcher and the
+  global environment button while scanning.
+- Displayed `扫描完成` briefly after scan completion, then hid the indicator so
+  it does not remain on the page.
+
+### Boundary Confirmation
+
+- No backend scan protocol changes.
+- No create, copy, delete, restore, install, uninstall, migration, Provider,
+  Permission, Channel, Scheduled Task, session, memory, or config write behavior
+  was added.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  62 Rust tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `git diff --check`: passed.
+- `git status --short`: reviewed.
+
+### Risks
+
+- The progress indicator is indeterminate because the current scanner does not
+  expose exact filesystem progress events.
+
+### Next Step
+
+If exact progress is needed, add a backend scan progress event protocol in a
+separate reviewed slice.
+
+## 2026-06-03 - Async Background Agent/Profile Scan
+
+### Task Goal
+
+Change read-only Agent/Profile scanning so app entry is not blocked by the
+filesystem scan.
+
+### Files Changed
+
+- `apps/desktop/src-tauri/src/commands/agent_profiles.rs`
+- `apps/desktop/src/app/App.tsx`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Split frontend runtime detection and agent/profile scanning into separate
+  effects.
+- Runtime install status now resolves and renders independently of managed
+  agent scan results.
+- Agent/profile scan starts as a Dashboard background task and updates the tree
+  when complete.
+- Converted `scan_managed_agents` to an async Tauri command that runs scanner
+  work through `tauri::async_runtime::spawn_blocking`.
+
+### Boundary Confirmation
+
+- No create, copy, delete, restore, install, uninstall, migration, Provider,
+  Permission, Channel, Scheduled Task, session, memory, gateway restart,
+  backup, or trash behavior was added.
+- No OpenClaw or Hermes config files are written.
+- No secret plaintext reads were added.
+- No network, account, hosted service, or telemetry behavior was added.
+- `hermes profile list` is still not called.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  62 Rust tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `git diff --check`: passed.
+- `git status --short`: reviewed.
+
+### Risks
+
+- Agent/profile results can now arrive after runtime status and after runtime
+  switching, so selection state must continue to tolerate empty or late-arriving
+  scan results.
+
+### Next Step
+
+Add a small rescan affordance or cached last scan state only after the async
+startup behavior is accepted.
+
+## 2026-06-03 - Scanner Safety Hardening Read-only
+
+### Task Goal
+
+Harden the read-only Agent/Profile scanner safety boundary without adding new
+product functionality.
+
+### Files Changed
+
+- `apps/desktop/src-tauri/src/commands/agent_profiles.rs`
+- `apps/desktop/src-tauri/src/scanner/mod.rs`
+- `apps/desktop/src-tauri/src/scanner/ignore.rs`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- OpenClaw `~/.openclaw` is now only a container/discovery source for managed
+  agent scanning.
+- OpenClaw managed scan candidates are limited to `~/.openclaw/agents/<id>`,
+  `~/.openclaw/workspace`, and `~/.openclaw/workspace-*`.
+- Scanner config collection now skips secret-bearing config files before
+  reading file bodies.
+- Skipped secret-bearing config files emit only the metadata warning
+  `secret_config_file_skipped`.
+- Added a defensive parse guard so direct config parsing also refuses
+  secret-bearing filenames.
+
+### Boundary Confirmation
+
+- No create, copy, delete, restore, install, uninstall, migration, Provider,
+  Permission, Channel, Scheduled Task, gateway restart, backup, or trash
+  behavior was added.
+- No OpenClaw or Hermes config files are written.
+- No session or memory full content is read.
+- No secret-bearing config file body is read by the scanner path.
+- No secret plaintext is intentionally serialized in warnings, summaries,
+  managed agent responses, tests, or logs.
+- `hermes profile list` is still not called.
+
+### Tests Added / Updated
+
+- Added `openclaw_home_is_discovery_source_not_managed_agent`.
+- Added `scanner_skips_secret_bearing_config_files_without_reading_values`.
+- Existing redaction and private runtime directory tests remain in place.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  62 Rust tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `git diff --check`: passed.
+- `rg -n "auth.json|credential|credentials|token|secret|cookie|cookies|oauth" apps/desktop/src-tauri/src/scanner apps/desktop/src-tauri/src/commands`:
+  reviewed expected scanner skip/redaction logic, existing provider/lifecycle
+  guardrails, and tests.
+- `git status --short`: reviewed.
+
+### Risks
+
+- Some legitimate metadata stored only inside skipped secret-bearing filenames
+  will no longer be used for display.
+- Additional runtime-specific secret filename conventions may need to be added
+  as official OpenClaw / Hermes documentation is reviewed.
+
+### Next Step
+
+Review official runtime config filename conventions and add only documented
+safe metadata files to the scanner allowlist.
+
 ## 2026-06-03 - Phase 2 Agent/Profile Scan Read-only
 
 ### Task Goal

@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 use thiserror::Error;
 
-use self::ignore::is_private_runtime_dir;
+use self::ignore::{is_private_runtime_dir, is_secret_bearing_config_file};
 pub use self::types::*;
 
 #[derive(Debug, Error)]
@@ -204,6 +204,10 @@ pub(crate) fn health_status(
 }
 
 pub(crate) fn parse_config(path: &Path) -> Option<Value> {
+    if is_secret_bearing_config_file(path) {
+        return None;
+    }
+
     let extension = path.extension().and_then(|value| value.to_str())?;
     let content = fs::read_to_string(path).ok()?;
     match extension.to_ascii_lowercase().as_str() {
@@ -250,6 +254,12 @@ fn collect_config_files_inner(
         let path = entry.path();
         if path.is_dir() {
             collect_config_files_inner(&path, warnings, files);
+        } else if is_secret_bearing_config_file(&path) {
+            warnings.push(warning(
+                "secret_config_file_skipped",
+                "Skipped secret-bearing config file",
+                WarningSeverity::Info,
+            ));
         } else if is_config_file(&path) {
             files.push(path);
         }
@@ -330,18 +340,13 @@ mod tests {
         let root = repository_root().join("tests/fixtures/hermes");
         let records = hermes::scan_root(&root).expect("hermes fixture scan");
 
-        assert!(records
-            .iter()
-            .any(|record| record.name == "Hermes Consulting Agent"));
-        assert!(records
+        assert!(records.iter().any(|record| record.name == "consulting-agent"));
+        assert!(records.iter().any(|record| record.name == "dev-agent"));
+        assert!(records.iter().any(|record| record.name == "provider-matrix"));
+        assert!(records.iter().any(|record| record.name == "model-no-provider"));
+        assert!(!records
             .iter()
             .any(|record| record.name == "Hermes Dev Agent"));
-        assert!(records
-            .iter()
-            .any(|record| record.name == "Hermes Provider Matrix"));
-        assert!(records
-            .iter()
-            .any(|record| record.name == "Hermes Model Without Provider"));
         assert!(records
             .iter()
             .all(|record| record.runtime == AgentRuntime::Hermes));
@@ -394,6 +399,58 @@ mod tests {
                 "serialized records leaked {secret_value}"
             );
         }
+    }
+
+    #[test]
+    fn scanner_skips_secret_bearing_config_files_without_reading_values() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("agent");
+        fs::create_dir_all(&root).expect("agent root");
+        fs::write(
+            root.join("config.json"),
+            r#"{"name":"Safe Metadata","provider":"openai","model":{"default":"gpt-safe"}}"#,
+        )
+        .expect("write config");
+        fs::write(
+            root.join("auth.json"),
+            r#"{"name":"Leaked Auth Name","api_key":"AUTH_CANARY_006"}"#,
+        )
+        .expect("write auth");
+        fs::write(
+            root.join("credentials.json"),
+            r#"{"provider":"bad-provider","token":"CREDENTIAL_CANARY_006"}"#,
+        )
+        .expect("write credentials");
+        fs::write(root.join(".env"), "OPENAI_API_KEY=ENV_CANARY_006").expect("write env");
+
+        let records = openclaw::scan_root(&root).expect("scan root");
+        let rendered = serde_json::to_string(&records).expect("records json");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "Safe Metadata");
+        assert_eq!(
+            records[0].provider_summary.provider.as_deref(),
+            Some("openai")
+        );
+        assert!(records[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.code == "secret_config_file_skipped"));
+        assert!(!records[0]
+            .config_paths
+            .iter()
+            .any(|path| path.file_name().and_then(|name| name.to_str()) == Some("auth.json")));
+        assert!(!records[0]
+            .config_paths
+            .iter()
+            .any(
+                |path| path.file_name().and_then(|name| name.to_str()) == Some("credentials.json")
+            ));
+        assert!(!rendered.contains("Leaked Auth Name"));
+        assert!(!rendered.contains("AUTH_CANARY_006"));
+        assert!(!rendered.contains("bad-provider"));
+        assert!(!rendered.contains("CREDENTIAL_CANARY_006"));
+        assert!(!rendered.contains("ENV_CANARY_006"));
     }
 
     #[test]

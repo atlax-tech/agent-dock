@@ -21,6 +21,8 @@ pub struct RuntimeInstallStatus {
     installed: bool,
     cli_path: Option<String>,
     version: Option<String>,
+    update_available: bool,
+    update_command: Option<String>,
     home_dir: Option<String>,
     config_path: Option<String>,
     gateway_running: Option<bool>,
@@ -48,14 +50,23 @@ impl DetectionOptions {
 #[tauri::command]
 pub fn detect_runtime_install_statuses() -> Vec<RuntimeInstallStatus> {
     let options = DetectionOptions::from_env();
-    vec![
-        detect_openclaw(&options),
-        detect_hermes(&options),
-    ]
+    vec![detect_openclaw(&options), detect_hermes(&options)]
+}
+
+#[tauri::command]
+pub async fn update_runtime_product(product: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || update_runtime_product_blocking(&product))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 fn detect_openclaw(options: &DetectionOptions) -> RuntimeInstallStatus {
-    detect_runtime(RuntimeProduct::OpenClaw, "openclaw", vec![options.home_dir.join(".openclaw")], options)
+    detect_runtime(
+        RuntimeProduct::OpenClaw,
+        "openclaw",
+        vec![options.home_dir.join(".openclaw")],
+        options,
+    )
 }
 
 fn detect_hermes(options: &DetectionOptions) -> RuntimeInstallStatus {
@@ -75,7 +86,12 @@ fn detect_runtime(
     options: &DetectionOptions,
 ) -> RuntimeInstallStatus {
     let cli_path = find_cli(cli_name, options.path_var.as_ref());
-    let version = cli_path.as_ref().and_then(|path| read_cli_version(path));
+    let raw_version = cli_path.as_ref().and_then(|path| read_cli_version(path));
+    let version = raw_version.as_deref().and_then(extract_version_number);
+    let update_available = raw_version
+        .as_deref()
+        .map(version_reports_update_available)
+        .unwrap_or(false);
     let home_dir = home_candidates.into_iter().find(|path| path.is_dir());
     let config_path = home_dir.as_ref().filter(|path| path.is_dir()).cloned();
 
@@ -83,16 +99,27 @@ fn detect_runtime(
     let mut warnings = Vec::new();
 
     if cli_path.is_some() && version.is_none() {
-        warnings.push(format!("{cli_name} CLI was found but `{cli_name} --version` did not return a usable version."));
+        warnings.push(format!(
+            "{cli_name} CLI was found but `{cli_name} --version` did not return a usable version."
+        ));
     }
     if cli_path.is_none() && config_path.is_some() {
-        warnings.push(format!("{} home/config directory exists but CLI was not found in PATH.", product.label()));
+        warnings.push(format!(
+            "{} home/config directory exists but CLI was not found in PATH.",
+            product.label()
+        ));
     }
     if cli_path.is_some() && config_path.is_none() {
-        warnings.push(format!("{} CLI exists but default home/config directory was not found.", product.label()));
+        warnings.push(format!(
+            "{} CLI exists but default home/config directory was not found.",
+            product.label()
+        ));
     }
     if matches!(confidence, "unknown") {
-        warnings.push(format!("No reliable {} CLI or home/config evidence was found.", product.label()));
+        warnings.push(format!(
+            "No reliable {} CLI or home/config evidence was found.",
+            product.label()
+        ));
     }
 
     RuntimeInstallStatus {
@@ -100,11 +127,43 @@ fn detect_runtime(
         installed: matches!(confidence, "high" | "medium"),
         cli_path: cli_path.map(|path| path.display().to_string()),
         version,
+        update_available,
+        update_command: Some(format!("{cli_name} update")),
         home_dir: home_dir.map(|path| path.display().to_string()),
         config_path: config_path.map(|path| path.display().to_string()),
         gateway_running: None,
         detection_confidence: confidence.to_string(),
         warnings,
+    }
+}
+
+fn update_runtime_product_blocking(product: &str) -> Result<String, String> {
+    let cli_name = match product {
+        "openclaw" => "openclaw",
+        "hermes" => "hermes",
+        _ => return Err("Unsupported runtime product.".to_string()),
+    };
+    let options = DetectionOptions::from_env();
+    let cli_path = find_cli(cli_name, options.path_var.as_ref())
+        .ok_or_else(|| format!("{cli_name} CLI was not found in PATH."))?;
+    let output = Command::new(&cli_path)
+        .arg("update")
+        .output()
+        .map_err(|error| format!("Failed to run `{cli_name} update`: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        let detail = if stderr.is_empty() { stdout } else { stderr };
+        return Err(if detail.is_empty() {
+            format!("`{cli_name} update` failed.")
+        } else {
+            format!("`{cli_name} update` failed: {detail}")
+        });
+    }
+    if stdout.is_empty() {
+        Ok(stderr)
+    } else {
+        Ok(stdout)
     }
 }
 
@@ -133,7 +192,9 @@ fn find_cli(cli_name: &str, path_var: Option<&OsString>) -> Option<PathBuf> {
 }
 
 fn is_executable_file(path: &Path) -> bool {
-    fs::metadata(path).map(|metadata| metadata.is_file()).unwrap_or(false)
+    fs::metadata(path)
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false)
 }
 
 fn read_cli_version(cli_path: &Path) -> Option<String> {
@@ -151,6 +212,33 @@ fn read_cli_version(cli_path: &Path) -> Option<String> {
     } else {
         Some(version)
     }
+}
+
+fn extract_version_number(raw: &str) -> Option<String> {
+    raw.split_whitespace()
+        .map(|part| {
+            part.trim_matches(|ch: char| {
+                matches!(ch, '(' | ')' | ',' | ';' | ':' | '[' | ']') || ch == 'v'
+            })
+        })
+        .find(|part| {
+            let mut segments = part.split('.');
+            matches!(
+                (segments.next(), segments.next()),
+                (Some(major), Some(minor))
+                    if major.chars().all(|ch| ch.is_ascii_digit())
+                        && minor.chars().all(|ch| ch.is_ascii_digit())
+            )
+        })
+        .map(str::to_string)
+}
+
+fn version_reports_update_available(raw: &str) -> bool {
+    let normalized = raw.to_ascii_lowercase();
+    normalized.contains("update available")
+        || normalized.contains("new version")
+        || normalized.contains("upgrade available")
+        || normalized.contains("有新版本")
 }
 
 impl RuntimeProduct {
@@ -213,13 +301,34 @@ mod tests {
         let hermes = detect_hermes(&options);
 
         assert!(openclaw.installed);
-        assert_eq!(openclaw.version.as_deref(), Some("openclaw 1.2.3"));
-        assert_eq!(openclaw.home_dir.as_deref(), Some(home.join(".openclaw").to_str().unwrap()));
+        assert_eq!(openclaw.version.as_deref(), Some("1.2.3"));
+        assert_eq!(
+            openclaw.home_dir.as_deref(),
+            Some(home.join(".openclaw").to_str().unwrap())
+        );
         assert_eq!(openclaw.detection_confidence, "high");
         assert!(hermes.installed);
-        assert_eq!(hermes.version.as_deref(), Some("hermes 4.5.6"));
-        assert_eq!(hermes.home_dir.as_deref(), Some(home.join(".hermes").to_str().unwrap()));
+        assert_eq!(hermes.version.as_deref(), Some("4.5.6"));
+        assert_eq!(
+            hermes.home_dir.as_deref(),
+            Some(home.join(".hermes").to_str().unwrap())
+        );
         assert_eq!(hermes.detection_confidence, "high");
+    }
+
+    #[test]
+    fn extracts_clean_version_and_update_state_from_cli_output() {
+        assert_eq!(
+            extract_version_number(
+                "Hermes Agent v0.15.1 (2026.5.29) Project: /tmp Update available: run 'hermes update'"
+            )
+            .as_deref(),
+            Some("0.15.1")
+        );
+        assert!(version_reports_update_available(
+            "Hermes Agent v0.15.1 Update available: run 'hermes update'"
+        ));
+        assert!(!version_reports_update_available("openclaw 1.2.3"));
     }
 
     #[test]
@@ -240,7 +349,10 @@ mod tests {
 
         assert!(!hermes.installed);
         assert_eq!(hermes.detection_confidence, "low");
-        assert_eq!(hermes.home_dir.as_deref(), Some(hermes_home.to_str().unwrap()));
+        assert_eq!(
+            hermes.home_dir.as_deref(),
+            Some(hermes_home.to_str().unwrap())
+        );
     }
 
     #[cfg(unix)]

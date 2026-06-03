@@ -31,6 +31,8 @@ type RuntimeInstallStatus = {
   installed: boolean;
   cliPath?: string | null;
   version?: string | null;
+  updateAvailable?: boolean;
+  updateCommand?: string | null;
   homeDir?: string | null;
   configPath?: string | null;
   gatewayRunning?: boolean | null;
@@ -63,6 +65,7 @@ type ManagedAgent = {
   displayName: string;
   description?: string | null;
   agentKind: "openclaw-agent" | "hermes-profile";
+  launchCommand?: string | null;
   configRoot: string;
   workspaceOrProfilePath: string;
   effectiveCwd?: string | null;
@@ -79,6 +82,7 @@ type ManagedAgent = {
 };
 
 type AgentScanSource = "desktop" | "fixture" | "empty";
+type ScanProgressState = "hidden" | "scanning" | "complete";
 type DashboardRuntime = MockRuntime & RuntimeInstallStatus;
 type TauriBridgeWindow = Window & {
   __TAURI_INTERNALS__?: unknown;
@@ -212,8 +216,13 @@ export function App() {
   );
   const [agentScanState, setAgentScanState] = useState<"loading" | "ready" | "error">("loading");
   const [agentScanError, setAgentScanError] = useState("");
+  const [scanProgressState, setScanProgressState] = useState<ScanProgressState>("hidden");
+  const [rescanRequestId, setRescanRequestId] = useState(0);
+  const [runtimeDetectionRequestId, setRuntimeDetectionRequestId] = useState(0);
   const [runtimeDetectionState, setRuntimeDetectionState] = useState<"loading" | "ready" | "error">("loading");
   const [runtimeDetectionError, setRuntimeDetectionError] = useState("");
+  const [runtimeUpdateState, setRuntimeUpdateState] = useState<"idle" | "running" | "success" | "error">("idle");
+  const [runtimeUpdateMessage, setRuntimeUpdateMessage] = useState("");
 
   const runtime = useMemo(
     () => ({
@@ -241,27 +250,18 @@ export function App() {
     if (!hasTauriCommandBridge()) {
       setRuntimeDetectionState("error");
       setRuntimeDetectionError("Tauri command bridge unavailable in browser preview.");
-      setAgentScanState(getBrowserFixtureEnabled() ? "ready" : "error");
-      setAgentScanError("Tauri command bridge unavailable in browser preview.");
       return () => {
         cancelled = true;
       };
     }
 
-    Promise.all([
-      invoke<RuntimeInstallStatus[]>("detect_runtime_install_statuses"),
-      invoke<ManagedAgent[]>("scan_managed_agents"),
-    ])
-      .then(([statuses, agents]) => {
+    invoke<RuntimeInstallStatus[]>("detect_runtime_install_statuses")
+      .then((statuses) => {
         if (cancelled) {
           return;
         }
 
         setRuntimeStatuses(normalizeRuntimeStatuses(statuses));
-        setManagedAgents(normalizeManagedAgents(agents));
-        setAgentScanSource("desktop");
-        setAgentScanState("ready");
-        setAgentScanError("");
         setRuntimeDetectionState("ready");
         setRuntimeDetectionError("");
       })
@@ -272,14 +272,79 @@ export function App() {
 
         setRuntimeDetectionState("error");
         setRuntimeDetectionError(error instanceof Error ? error.message : String(error));
-        setAgentScanState("error");
-        setAgentScanError(error instanceof Error ? error.message : String(error));
       });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [runtimeDetectionRequestId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+
+    if (!hasTauriCommandBridge()) {
+      setAgentScanState(getBrowserFixtureEnabled() ? "ready" : "error");
+      setAgentScanError("Tauri command bridge unavailable in browser preview.");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (activeRoute !== "dashboard") {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setAgentScanState("loading");
+    setAgentScanError("");
+    setScanProgressState("scanning");
+    timer = window.setTimeout(() => {
+      invoke<ManagedAgent[]>("scan_managed_agents")
+        .then((agents) => {
+          if (cancelled) {
+            return;
+          }
+
+          setManagedAgents(normalizeManagedAgents(agents));
+          setAgentScanSource("desktop");
+          setAgentScanState("ready");
+          setAgentScanError("");
+          setScanProgressState("complete");
+        })
+        .catch((error: unknown) => {
+          if (cancelled) {
+            return;
+          }
+
+          setAgentScanState("error");
+          setAgentScanError(error instanceof Error ? error.message : String(error));
+          setScanProgressState("hidden");
+        });
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [activeRoute, rescanRequestId]);
+
+  useEffect(() => {
+    if (scanProgressState !== "complete") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setScanProgressState("hidden");
+    }, 1600);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [scanProgressState]);
 
   useEffect(() => {
     if (runtimeAgents.length === 0) {
@@ -302,6 +367,39 @@ export function App() {
     setExpandedItem(nextItem);
     setSelectedItem(nextItem);
     setSelectedOperation("basic");
+  }
+
+  function requestRescan() {
+    setRescanRequestId((current) => current + 1);
+  }
+
+  function requestRuntimeUpdate(product: RuntimeProduct) {
+    if (!hasTauriCommandBridge()) {
+      setRuntimeUpdateState("error");
+      setRuntimeUpdateMessage("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setRuntimeUpdateState("running");
+    setRuntimeUpdateMessage("");
+    invoke<string>("update_runtime_product", { product })
+      .then(() => {
+        setRuntimeUpdateState("success");
+        setRuntimeUpdateMessage("升级完成");
+        setRuntimeStatuses((current) => ({
+          ...current,
+          [product]: {
+            ...current[product],
+            updateAvailable: false,
+          },
+        }));
+        setRuntimeDetectionRequestId((current) => current + 1);
+        setRescanRequestId((current) => current + 1);
+      })
+      .catch((error: unknown) => {
+        setRuntimeUpdateState("error");
+        setRuntimeUpdateMessage(error instanceof Error ? error.message : String(error));
+      });
   }
 
   return (
@@ -389,8 +487,13 @@ export function App() {
             agentScanError={agentScanError}
             agentScanSource={agentScanSource}
             agentScanState={agentScanState}
+            onRequestRescan={requestRescan}
+            scanProgressState={scanProgressState}
             runtimeDetectionError={runtimeDetectionError}
             runtimeDetectionState={runtimeDetectionState}
+            runtimeUpdateMessage={runtimeUpdateMessage}
+            runtimeUpdateState={runtimeUpdateState}
+            onRequestRuntimeUpdate={requestRuntimeUpdate}
             setExpandedItem={setExpandedItem}
             setSelectedItem={setSelectedItem}
             setSelectedOperation={setSelectedOperation}
@@ -416,8 +519,13 @@ function DashboardView({
   selectedOperation,
   selectedOperationNode,
   selectedRuntime,
+  onRequestRescan,
+  scanProgressState,
   runtimeDetectionError,
   runtimeDetectionState,
+  runtimeUpdateMessage,
+  runtimeUpdateState,
+  onRequestRuntimeUpdate,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -434,8 +542,13 @@ function DashboardView({
   selectedOperation: OperationNode;
   selectedOperationNode: { id: OperationNode; label: string; description: string };
   selectedRuntime: RuntimeProduct;
+  onRequestRescan: () => void;
+  scanProgressState: ScanProgressState;
   runtimeDetectionError: string;
   runtimeDetectionState: "loading" | "ready" | "error";
+  runtimeUpdateMessage: string;
+  runtimeUpdateState: "idle" | "running" | "success" | "error";
+  onRequestRuntimeUpdate: (product: RuntimeProduct) => void;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -456,6 +569,22 @@ function DashboardView({
             </button>
           ))}
         </div>
+        <button
+          className="rescanButton"
+          type="button"
+          aria-label="重新扫描"
+          title="重新扫描"
+          disabled={scanProgressState === "scanning"}
+          onClick={onRequestRescan}
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M20 6v5h-5" />
+            <path d="M4 18v-5h5" />
+            <path d="M19 11a7 7 0 0 0-12.2-4.7L4 9" />
+            <path d="M5 13a7 7 0 0 0 12.2 4.7L20 15" />
+          </svg>
+        </button>
+        <ScanProgressIndicator state={scanProgressState} />
         <button className="secondaryButton" type="button" disabled>
           全局环境变量
         </button>
@@ -471,6 +600,8 @@ function DashboardView({
           expandedItem={expandedItem}
           runtime={runtime}
           runtimeAgents={runtimeAgents}
+          runtimeUpdateMessage={runtimeUpdateMessage}
+          runtimeUpdateState={runtimeUpdateState}
           selectedAgent={selectedAgent}
           selectedItem={selectedItem}
           selectedOperation={selectedOperation}
@@ -478,10 +609,31 @@ function DashboardView({
           setExpandedItem={setExpandedItem}
           setSelectedItem={setSelectedItem}
           setSelectedOperation={setSelectedOperation}
+          onRequestRuntimeUpdate={onRequestRuntimeUpdate}
         />
       ) : (
         <NotInstalledDashboard runtime={runtime} />
       )}
+    </div>
+  );
+}
+
+function ScanProgressIndicator({ state }: { state: ScanProgressState }) {
+  if (state === "hidden") {
+    return null;
+  }
+
+  return (
+    <div
+      className={state === "complete" ? "toolbarScanProgress toolbarScanProgressComplete" : "toolbarScanProgress"}
+      aria-live="polite"
+    >
+      <span>{state === "complete" ? "扫描完成" : "后台扫描中"}</span>
+      {state === "scanning" ? (
+        <div className="scanProgressTrack" aria-hidden="true">
+          <div className="scanProgressBar" />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -493,10 +645,13 @@ function InstalledDashboard({
   expandedItem,
   runtime,
   runtimeAgents,
+  runtimeUpdateMessage,
+  runtimeUpdateState,
   selectedAgent,
   selectedItem,
   selectedOperation,
   selectedOperationNode,
+  onRequestRuntimeUpdate,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -507,10 +662,13 @@ function InstalledDashboard({
   expandedItem: string;
   runtime: DashboardRuntime;
   runtimeAgents: ManagedAgent[];
+  runtimeUpdateMessage: string;
+  runtimeUpdateState: "idle" | "running" | "success" | "error";
   selectedAgent: ManagedAgent | null;
   selectedItem: string;
   selectedOperation: OperationNode;
   selectedOperationNode: { id: OperationNode; label: string; description: string };
+  onRequestRuntimeUpdate: (product: RuntimeProduct) => void;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -520,15 +678,25 @@ function InstalledDashboard({
       <section className="runtimeStatus" aria-label={`${runtime.label} runtime status`}>
         <div>
           <span>CLI</span>
-          <strong>{runtime.cliPath ?? "未检测到"}</strong>
+          <strong>{selectedAgent?.launchCommand ?? "未选择 Agent/Profile"}</strong>
         </div>
         <div>
           <span>Version</span>
           <strong>{runtime.version ?? "未读取到"}</strong>
+          {runtime.updateAvailable ? (
+            <button
+              className="inlineUpdateButton"
+              type="button"
+              disabled={runtimeUpdateState === "running"}
+              onClick={() => onRequestRuntimeUpdate(runtime.product)}
+            >
+              {runtimeUpdateState === "running" ? "升级中" : "有新版本可用"}
+            </button>
+          ) : null}
         </div>
         <div>
-          <span>Home / config</span>
-          <strong>{runtime.configPath ?? runtime.homeDir ?? "未检测到"}</strong>
+          <span>Agent目录</span>
+          <strong>{selectedAgent?.workspaceOrProfilePath ?? runtime.homeDir ?? "未检测到"}</strong>
         </div>
         <div>
           <span>Gateway</span>
@@ -544,6 +712,15 @@ function InstalledDashboard({
           {runtime.warnings.map((warning) => (
             <span key={warning}>{warning}</span>
           ))}
+        </section>
+      ) : null}
+      {runtimeUpdateState === "success" || runtimeUpdateState === "error" ? (
+        <section
+          className={
+            runtimeUpdateState === "error" ? "runtimeUpdateNotice runtimeUpdateNoticeWarning" : "runtimeUpdateNotice"
+          }
+        >
+          {runtimeUpdateMessage}
         </section>
       ) : null}
       <AgentScanNotice source={agentScanSource} state={agentScanState} error={agentScanError} />
@@ -891,6 +1068,8 @@ function getEmptyRuntimeStatuses(): Record<RuntimeProduct, RuntimeInstallStatus>
     openclaw: {
       product: "openclaw",
       installed: false,
+      updateAvailable: false,
+      updateCommand: "openclaw update",
       gatewayRunning: null,
       detectionConfidence: "unknown",
       warnings: ["No reliable OpenClaw CLI or home/config evidence was found."],
@@ -898,6 +1077,8 @@ function getEmptyRuntimeStatuses(): Record<RuntimeProduct, RuntimeInstallStatus>
     hermes: {
       product: "hermes",
       installed: false,
+      updateAvailable: false,
+      updateCommand: "hermes update",
       gatewayRunning: null,
       detectionConfidence: "unknown",
       warnings: ["No reliable Hermes CLI or home/config evidence was found."],
@@ -915,7 +1096,9 @@ function getBrowserRuntimeDetectionFallback(): Record<RuntimeProduct, RuntimeIns
       product: "openclaw",
       installed: true,
       cliPath: "/mock/bin/openclaw",
-      version: "openclaw 0.0.0-fixture",
+      version: "0.0.0-fixture",
+      updateAvailable: false,
+      updateCommand: "openclaw update",
       homeDir: "/mock/home/.openclaw",
       configPath: "/mock/home/.openclaw",
       gatewayRunning: null,
@@ -926,7 +1109,9 @@ function getBrowserRuntimeDetectionFallback(): Record<RuntimeProduct, RuntimeIns
       product: "hermes",
       installed: true,
       cliPath: "/mock/bin/hermes",
-      version: "hermes 0.0.0-fixture",
+      version: "0.0.0-fixture",
+      updateAvailable: false,
+      updateCommand: "hermes update",
       homeDir: "/mock/home/.hermes",
       configPath: "/mock/home/.hermes",
       gatewayRunning: null,
@@ -955,6 +1140,10 @@ function browserFixtureAgent(product: RuntimeProduct, item: string): ManagedAgen
     displayName: item,
     description: null,
     agentKind: product === "openclaw" ? "openclaw-agent" : "hermes-profile",
+    launchCommand:
+      product === "openclaw"
+        ? `openclaw agent --agent ${item} --message "<message>"`
+        : `hermes --profile ${item} chat`,
     configRoot: `/mock/home/${product === "openclaw" ? ".openclaw" : ".hermes"}`,
     workspaceOrProfilePath: `/mock/home/${product === "openclaw" ? ".openclaw/agents" : ".hermes/profiles"}/${item}`,
     effectiveCwd: null,
