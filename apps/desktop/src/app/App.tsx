@@ -38,6 +38,47 @@ type RuntimeInstallStatus = {
   warnings: string[];
 };
 
+type RuntimeWarning = {
+  code: string;
+  message: string;
+  path?: string | null;
+  severity: "info" | "warning" | "error";
+};
+
+type ProviderSummary = {
+  provider?: string | null;
+  baseUrl?: string | null;
+  secretFields: string[];
+  missingSecretFields: string[];
+};
+
+type ModelSummary = {
+  defaultModel?: string | null;
+  fallbackModel?: string | null;
+};
+
+type ManagedAgent = {
+  id: string;
+  product: RuntimeProduct;
+  displayName: string;
+  description?: string | null;
+  agentKind: "openclaw-agent" | "hermes-profile";
+  configRoot: string;
+  workspaceOrProfilePath: string;
+  effectiveCwd?: string | null;
+  providerSummary?: ProviderSummary | null;
+  modelSummary?: ModelSummary | null;
+  permissionSummary?: { status: string } | null;
+  channelCount: number;
+  skillCount: number;
+  memoryCount?: number | null;
+  sessionCount?: number | null;
+  lastModified?: string | null;
+  warnings: RuntimeWarning[];
+  confidence: DetectionConfidence;
+};
+
+type AgentScanSource = "desktop" | "fixture" | "empty";
 type DashboardRuntime = MockRuntime & RuntimeInstallStatus;
 type TauriBridgeWindow = Window & {
   __TAURI_INTERNALS__?: unknown;
@@ -165,6 +206,12 @@ export function App() {
   const [runtimeStatuses, setRuntimeStatuses] = useState<Record<RuntimeProduct, RuntimeInstallStatus>>(
     getBrowserRuntimeDetectionFallback,
   );
+  const [managedAgents, setManagedAgents] = useState<ManagedAgent[]>(getBrowserManagedAgentFallback);
+  const [agentScanSource, setAgentScanSource] = useState<AgentScanSource>(() =>
+    getBrowserFixtureEnabled() ? "fixture" : "empty",
+  );
+  const [agentScanState, setAgentScanState] = useState<"loading" | "ready" | "error">("loading");
+  const [agentScanError, setAgentScanError] = useState("");
   const [runtimeDetectionState, setRuntimeDetectionState] = useState<"loading" | "ready" | "error">("loading");
   const [runtimeDetectionError, setRuntimeDetectionError] = useState("");
 
@@ -179,6 +226,14 @@ export function App() {
     () => operationNodes.find((node) => node.id === selectedOperation) ?? operationNodes[0],
     [selectedOperation],
   );
+  const runtimeAgents = useMemo(
+    () => managedAgents.filter((agent) => agent.product === selectedRuntime),
+    [managedAgents, selectedRuntime],
+  );
+  const selectedAgent = useMemo(
+    () => runtimeAgents.find((agent) => agent.id === selectedItem) ?? runtimeAgents[0] ?? null,
+    [runtimeAgents, selectedItem],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -186,18 +241,27 @@ export function App() {
     if (!hasTauriCommandBridge()) {
       setRuntimeDetectionState("error");
       setRuntimeDetectionError("Tauri command bridge unavailable in browser preview.");
+      setAgentScanState(getBrowserFixtureEnabled() ? "ready" : "error");
+      setAgentScanError("Tauri command bridge unavailable in browser preview.");
       return () => {
         cancelled = true;
       };
     }
 
-    invoke<RuntimeInstallStatus[]>("detect_runtime_install_statuses")
-      .then((statuses) => {
+    Promise.all([
+      invoke<RuntimeInstallStatus[]>("detect_runtime_install_statuses"),
+      invoke<ManagedAgent[]>("scan_managed_agents"),
+    ])
+      .then(([statuses, agents]) => {
         if (cancelled) {
           return;
         }
 
         setRuntimeStatuses(normalizeRuntimeStatuses(statuses));
+        setManagedAgents(normalizeManagedAgents(agents));
+        setAgentScanSource("desktop");
+        setAgentScanState("ready");
+        setAgentScanError("");
         setRuntimeDetectionState("ready");
         setRuntimeDetectionError("");
       })
@@ -208,6 +272,8 @@ export function App() {
 
         setRuntimeDetectionState("error");
         setRuntimeDetectionError(error instanceof Error ? error.message : String(error));
+        setAgentScanState("error");
+        setAgentScanError(error instanceof Error ? error.message : String(error));
       });
 
     return () => {
@@ -215,9 +281,23 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (runtimeAgents.length === 0) {
+      setExpandedItem("");
+      setSelectedItem("");
+      setSelectedOperation("basic");
+      return;
+    }
+
+    if (!runtimeAgents.some((agent) => agent.id === selectedItem)) {
+      setExpandedItem(runtimeAgents[0].id);
+      setSelectedItem(runtimeAgents[0].id);
+      setSelectedOperation("basic");
+    }
+  }, [runtimeAgents, selectedItem]);
+
   function selectRuntime(product: RuntimeProduct) {
-    const nextRuntime = mockRuntimes[product];
-    const nextItem = nextRuntime.items[0];
+    const nextItem = managedAgents.find((agent) => agent.product === product)?.id ?? "";
     setSelectedRuntime(product);
     setExpandedItem(nextItem);
     setSelectedItem(nextItem);
@@ -300,10 +380,15 @@ export function App() {
           <DashboardView
             expandedItem={expandedItem}
             runtime={runtime}
+            runtimeAgents={runtimeAgents}
+            selectedAgent={selectedAgent}
             selectedItem={selectedItem}
             selectedOperation={selectedOperation}
             selectedOperationNode={selectedOperationNode}
             selectedRuntime={selectedRuntime}
+            agentScanError={agentScanError}
+            agentScanSource={agentScanSource}
+            agentScanState={agentScanState}
             runtimeDetectionError={runtimeDetectionError}
             runtimeDetectionState={runtimeDetectionState}
             setExpandedItem={setExpandedItem}
@@ -320,8 +405,13 @@ export function App() {
 }
 
 function DashboardView({
+  agentScanError,
+  agentScanSource,
+  agentScanState,
   expandedItem,
   runtime,
+  runtimeAgents,
+  selectedAgent,
   selectedItem,
   selectedOperation,
   selectedOperationNode,
@@ -333,8 +423,13 @@ function DashboardView({
   setSelectedOperation,
   setSelectedRuntime,
 }: {
+  agentScanError: string;
+  agentScanSource: AgentScanSource;
+  agentScanState: "loading" | "ready" | "error";
   expandedItem: string;
   runtime: DashboardRuntime;
+  runtimeAgents: ManagedAgent[];
+  selectedAgent: ManagedAgent | null;
   selectedItem: string;
   selectedOperation: OperationNode;
   selectedOperationNode: { id: OperationNode; label: string; description: string };
@@ -370,8 +465,13 @@ function DashboardView({
 
       {runtime.installed ? (
         <InstalledDashboard
+          agentScanError={agentScanError}
+          agentScanSource={agentScanSource}
+          agentScanState={agentScanState}
           expandedItem={expandedItem}
           runtime={runtime}
+          runtimeAgents={runtimeAgents}
+          selectedAgent={selectedAgent}
           selectedItem={selectedItem}
           selectedOperation={selectedOperation}
           selectedOperationNode={selectedOperationNode}
@@ -387,8 +487,13 @@ function DashboardView({
 }
 
 function InstalledDashboard({
+  agentScanError,
+  agentScanSource,
+  agentScanState,
   expandedItem,
   runtime,
+  runtimeAgents,
+  selectedAgent,
   selectedItem,
   selectedOperation,
   selectedOperationNode,
@@ -396,8 +501,13 @@ function InstalledDashboard({
   setSelectedItem,
   setSelectedOperation,
 }: {
+  agentScanError: string;
+  agentScanSource: AgentScanSource;
+  agentScanState: "loading" | "ready" | "error";
   expandedItem: string;
   runtime: DashboardRuntime;
+  runtimeAgents: ManagedAgent[];
+  selectedAgent: ManagedAgent | null;
   selectedItem: string;
   selectedOperation: OperationNode;
   selectedOperationNode: { id: OperationNode; label: string; description: string };
@@ -436,6 +546,7 @@ function InstalledDashboard({
           ))}
         </section>
       ) : null}
+      <AgentScanNotice source={agentScanSource} state={agentScanState} error={agentScanError} />
 
       <section className="managementLayout">
         <article className="treePanel">
@@ -450,21 +561,28 @@ function InstalledDashboard({
             {runtime.addLabel}
           </button>
 
-          <div className="accordionTree">
-            {runtime.items.map((item) => {
-              const expanded = expandedItem === item;
+          {runtimeAgents.length === 0 ? (
+            <div className="emptyTreeState">
+              <strong>未扫描到{runtime.entityLabel}</strong>
+              <span>该 runtime 已安装，但只读扫描未找到可展示的 agents/profiles。</span>
+            </div>
+          ) : (
+            <div className="accordionTree">
+              {runtimeAgents.map((agent) => {
+              const expanded = expandedItem === agent.id;
               return (
-                <div className="agentAccordion" key={item}>
+                <div className="agentAccordion" key={agent.id}>
                   <button
-                    className={selectedItem === item ? "agentHeader agentHeaderActive" : "agentHeader"}
+                    className={selectedItem === agent.id ? "agentHeader agentHeaderActive" : "agentHeader"}
                     type="button"
                     onClick={() => {
-                      setExpandedItem(expanded ? "" : item);
-                      setSelectedItem(item);
+                      setExpandedItem(expanded ? "" : agent.id);
+                      setSelectedItem(agent.id);
                       setSelectedOperation("basic");
                     }}
                   >
-                    <span>{item}</span>
+                    <span>{agent.displayName}</span>
+                    <small>{agentScanSource === "fixture" ? "fixture" : agent.confidence}</small>
                     <span aria-hidden="true">{expanded ? "−" : "+"}</span>
                   </button>
                   {expanded ? (
@@ -472,14 +590,14 @@ function InstalledDashboard({
                       {operationNodes.map((node) => (
                         <button
                           className={
-                            selectedItem === item && selectedOperation === node.id
+                            selectedItem === agent.id && selectedOperation === node.id
                               ? "operationItem operationItemActive"
                               : "operationItem"
                           }
-                          key={`${item}:${node.id}`}
+                          key={`${agent.id}:${node.id}`}
                           type="button"
                           onClick={() => {
-                            setSelectedItem(item);
+                            setSelectedItem(agent.id);
                             setSelectedOperation(node.id);
                           }}
                         >
@@ -491,7 +609,8 @@ function InstalledDashboard({
                 </div>
               );
             })}
-          </div>
+            </div>
+          )}
         </article>
 
         <article className="operationPane">
@@ -506,14 +625,39 @@ function InstalledDashboard({
             </div>
             <div>
               <dt>{runtime.entityLabel}</dt>
-              <dd>{selectedItem}</dd>
+              <dd>{selectedAgent?.displayName ?? "未选择"}</dd>
             </div>
             <div>
               <dt>Operation</dt>
               <dd>{selectedOperationNode.label}</dd>
             </div>
           </dl>
+          {selectedAgent ? (
+            <dl className="paneMeta paneMetaWide">
+              <div>
+                <dt>Path</dt>
+                <dd>{selectedAgent.workspaceOrProfilePath}</dd>
+              </div>
+              <div>
+                <dt>Confidence</dt>
+                <dd>{selectedAgent.confidence}</dd>
+              </div>
+              <div>
+                <dt>Skills / Channels</dt>
+                <dd>
+                  {selectedAgent.skillCount} / {selectedAgent.channelCount}
+                </dd>
+              </div>
+            </dl>
+          ) : null}
           <p>{selectedOperationNode.description}</p>
+          {selectedAgent && selectedAgent.warnings.length > 0 ? (
+            <div className="agentWarnings">
+              {selectedAgent.warnings.slice(0, 4).map((warning) => (
+                <span key={`${selectedAgent.id}:${warning.code}:${warning.message}`}>{warning.message}</span>
+              ))}
+            </div>
+          ) : null}
           <div className="safetyList">
             <span>只读占位</span>
             <span>未调用后端命令</span>
@@ -575,6 +719,41 @@ function RuntimeDetectionNotice({
       {state === "error" ? (
         <>
           <strong>当前使用本地 fallback 状态</strong>
+          <span>{error || "Tauri command bridge unavailable."}</span>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function AgentScanNotice({
+  error,
+  source,
+  state,
+}: {
+  error: string;
+  source: AgentScanSource;
+  state: "loading" | "ready" | "error";
+}) {
+  if (state === "ready" && source === "desktop") {
+    return null;
+  }
+
+  if (source === "fixture") {
+    return (
+      <section className="agentScanNotice">
+        <strong>Browser fixture only</strong>
+        <span>Desktop runtime uses read-only Tauri scan results.</span>
+      </section>
+    );
+  }
+
+  return (
+    <section className={state === "error" ? "agentScanNotice agentScanNoticeWarning" : "agentScanNotice"}>
+      {state === "loading" ? "正在只读扫描 agents/profiles..." : null}
+      {state === "error" ? (
+        <>
+          <strong>Agent/Profile scan unavailable</strong>
           <span>{error || "Tauri command bridge unavailable."}</span>
         </>
       ) : null}
@@ -696,6 +875,17 @@ function normalizeRuntimeStatuses(statuses: RuntimeInstallStatus[]): Record<Runt
   return fallback;
 }
 
+function normalizeManagedAgents(agents: ManagedAgent[]): ManagedAgent[] {
+  return agents
+    .filter((agent) => agent.product === "openclaw" || agent.product === "hermes")
+    .map((agent) => ({
+      ...agent,
+      channelCount: agent.channelCount ?? 0,
+      skillCount: agent.skillCount ?? 0,
+      warnings: agent.warnings ?? [],
+    }));
+}
+
 function getEmptyRuntimeStatuses(): Record<RuntimeProduct, RuntimeInstallStatus> {
   return {
     openclaw: {
@@ -716,15 +906,7 @@ function getEmptyRuntimeStatuses(): Record<RuntimeProduct, RuntimeInstallStatus>
 }
 
 function getBrowserRuntimeDetectionFallback(): Record<RuntimeProduct, RuntimeInstallStatus> {
-  if (typeof window === "undefined") {
-    return getEmptyRuntimeStatuses();
-  }
-
-  const fixture =
-    new URLSearchParams(window.location.search).get("agentdockRuntimeFixture") ??
-    window.localStorage.getItem("agentdockRuntimeFixture");
-
-  if (fixture !== "installed") {
+  if (!getBrowserFixtureEnabled()) {
     return getEmptyRuntimeStatuses();
   }
 
@@ -752,6 +934,60 @@ function getBrowserRuntimeDetectionFallback(): Record<RuntimeProduct, RuntimeIns
       warnings: ["Browser fixture only; desktop runtime uses the Tauri detection command."],
     },
   };
+}
+
+function getBrowserManagedAgentFallback(): ManagedAgent[] {
+  if (!getBrowserFixtureEnabled()) {
+    return [];
+  }
+
+  return [
+    ...mockRuntimes.openclaw.items.map((item) => browserFixtureAgent("openclaw", item)),
+    ...mockRuntimes.hermes.items.map((item) => browserFixtureAgent("hermes", item)),
+  ];
+}
+
+function browserFixtureAgent(product: RuntimeProduct, item: string): ManagedAgent {
+  const runtime = mockRuntimes[product];
+  return {
+    id: `fixture:${product}:${item}`,
+    product,
+    displayName: item,
+    description: null,
+    agentKind: product === "openclaw" ? "openclaw-agent" : "hermes-profile",
+    configRoot: `/mock/home/${product === "openclaw" ? ".openclaw" : ".hermes"}`,
+    workspaceOrProfilePath: `/mock/home/${product === "openclaw" ? ".openclaw/agents" : ".hermes/profiles"}/${item}`,
+    effectiveCwd: null,
+    providerSummary: null,
+    modelSummary: null,
+    permissionSummary: null,
+    channelCount: 0,
+    skillCount: 0,
+    memoryCount: null,
+    sessionCount: null,
+    lastModified: null,
+    warnings: [
+      {
+        code: "browser_fixture_only",
+        message: `${runtime.label} ${runtime.entityLabel} fixture only; desktop runtime uses read-only scan results.`,
+        path: null,
+        severity: "info",
+      },
+    ],
+    confidence: "high",
+  };
+}
+
+function getBrowserFixtureEnabled() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const fixture =
+    new URLSearchParams(window.location.search).get("agentdockRuntimeFixture") ??
+    window.localStorage.getItem("agentdockRuntimeFixture");
+
+  return fixture === "installed";
 }
 
 function formatGateway(gatewayRunning?: boolean | null) {

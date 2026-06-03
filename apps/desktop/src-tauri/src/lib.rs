@@ -10,6 +10,7 @@ pub fn run() {
                 .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })
         })
         .invoke_handler(tauri::generate_handler![
+            commands::agent_profiles::scan_managed_agents,
             commands::bootstrap::bootstrap_status,
             commands::fixtures::fixture_scan_summary,
             commands::scanner::get_initial_scan_state,

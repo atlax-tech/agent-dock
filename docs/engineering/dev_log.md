@@ -1,5 +1,75 @@
 # AgentDock Development Log
 
+## 2026-06-03 - Phase 2 Agent/Profile Scan Read-only
+
+### Task Goal
+
+Implement read-only OpenClaw / Hermes agent/profile scanning and make the
+Dashboard Agent/Profile Tree render from scan results for installed runtimes.
+
+### Files Changed
+
+- `apps/desktop/src-tauri/src/commands/agent_profiles.rs`
+- `apps/desktop/src-tauri/src/commands/mod.rs`
+- `apps/desktop/src-tauri/src/lib.rs`
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added `scan_managed_agents`, a read-only Tauri command returning
+  `ManagedAgent` entries for OpenClaw agents and Hermes profiles.
+- OpenClaw scan candidates are limited to `~/.openclaw/agents/`,
+  `~/.openclaw/workspace`, `~/.openclaw/workspace-*`, and the runtime home
+  candidate already used by local detection.
+- Hermes scan candidates are limited to `$HERMES_HOME` and `~/.hermes/`.
+- `hermes profile list` is intentionally not called because this codebase does
+  not yet have a reusable timeout-bound safe command wrapper for that output.
+- Dashboard installed runtime tree now renders scanned agents/profiles instead
+  of mock names.
+- Installed runtimes with no scan results show an empty state instead of
+  substituting mock data.
+- Browser preview can still use fixture agents/profiles, but the UI labels them
+  as browser fixture data.
+
+### Boundary Confirmation
+
+- No agent/profile create, copy, delete, or restore behavior was added.
+- No OpenClaw or Hermes config writes were added.
+- No install, uninstall, migration, Provider, Permission, Channel, Scheduled
+  Task, gateway restart, backup, or trash implementation was added.
+- No session or memory full content is read.
+- No secret plaintext is serialized or displayed; scanner warnings expose
+  redacted field presence only.
+
+### Validation Performed
+
+- Pre-flight `npm run check`: passed.
+- Pre-flight `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`:
+  passed.
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  60 Rust tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `git diff --check`: passed.
+- `git status --short`: reviewed.
+
+### Risks
+
+- Local OpenClaw / Hermes directory layouts may differ from the limited
+  read-only candidates in this phase.
+- Low-confidence directory-shape results may show incomplete agent/profile
+  metadata.
+- `$HERMES_HOME` availability depends on the desktop process environment.
+
+### Next Step
+
+Add a reviewed safe CLI command wrapper before using `hermes profile list`, or
+continue with a narrow install-plan preview slice after this read-only scan is
+accepted.
+
 ## 2026-06-03 - Runtime Detection Tauri Bridge Repair
 
 ### Task Goal

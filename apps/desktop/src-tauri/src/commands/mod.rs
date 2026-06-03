@@ -1,3 +1,4 @@
+pub mod agent_profiles;
 pub mod bootstrap;
 pub mod fixtures;
 pub mod lifecycle;
