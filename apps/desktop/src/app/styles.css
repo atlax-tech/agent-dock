@@ -262,6 +262,33 @@ button {
   font-size: 13px;
 }
 
+.runtimeDetectionNotice,
+.runtimeWarnings,
+.notInstalledWarnings {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid #dce8e3;
+  border-radius: 8px;
+  color: #31515b;
+  background: #f4f8f6;
+  font-size: 13px;
+}
+
+.runtimeDetectionNoticeWarning,
+.runtimeWarnings,
+.notInstalledWarnings {
+  border-color: #ead8b8;
+  color: #5a4724;
+  background: #fff8ea;
+}
+
+.runtimeDetectionNotice strong {
+  font-size: 13px;
+}
+
 .managementLayout {
   display: grid;
   grid-template-columns: minmax(290px, 0.78fr) minmax(420px, 1.22fr);

@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useMemo, useState } from "react";
 
 type DockRoute = "dashboard" | "migration" | "settings";
 type RuntimeProduct = "openclaw" | "hermes";
 type ThemeMode = "light" | "dark";
 type LanguageMode = "zh" | "en";
+type DetectionConfidence = "unknown" | "low" | "medium" | "high";
 
 type OperationNode =
   | "basic"
@@ -21,14 +23,22 @@ type MockRuntime = {
   label: string;
   entityLabel: string;
   addLabel: string;
-  installed: boolean;
-  cliPath: string;
-  version: string;
-  homeDir: string;
-  gateway: string;
-  confidence: string;
   items: string[];
 };
+
+type RuntimeInstallStatus = {
+  product: RuntimeProduct;
+  installed: boolean;
+  cliPath?: string | null;
+  version?: string | null;
+  homeDir?: string | null;
+  configPath?: string | null;
+  gatewayRunning?: boolean | null;
+  detectionConfidence: DetectionConfidence;
+  warnings: string[];
+};
+
+type DashboardRuntime = MockRuntime & RuntimeInstallStatus;
 
 const dockRoutes: { id: DockRoute; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
@@ -90,12 +100,6 @@ const mockRuntimes: Record<RuntimeProduct, MockRuntime> = {
     label: "OpenClaw",
     entityLabel: "Agent",
     addLabel: "+ Add Agent",
-    installed: true,
-    cliPath: "/usr/local/bin/openclaw",
-    version: "v0.3 mock",
-    homeDir: "~/.openclaw",
-    gateway: "未检查",
-    confidence: "mock / layout only",
     items: ["main", "consulting-agent", "dev-agent"],
   },
   hermes: {
@@ -103,12 +107,6 @@ const mockRuntimes: Record<RuntimeProduct, MockRuntime> = {
     label: "Hermes",
     entityLabel: "Profile",
     addLabel: "+ Add Profile",
-    installed: false,
-    cliPath: "/usr/local/bin/hermes",
-    version: "v0.3 mock",
-    homeDir: "~/.hermes",
-    gateway: "未检查",
-    confidence: "mock / layout only",
     items: ["default", "consulting", "auto-business"],
   },
 };
@@ -161,12 +159,58 @@ export function App() {
   const [selectedOperation, setSelectedOperation] = useState<OperationNode>("basic");
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [language, setLanguage] = useState<LanguageMode>("zh");
+  const [runtimeStatuses, setRuntimeStatuses] = useState<Record<RuntimeProduct, RuntimeInstallStatus>>(
+    getBrowserRuntimeDetectionFallback,
+  );
+  const [runtimeDetectionState, setRuntimeDetectionState] = useState<"loading" | "ready" | "error">("loading");
+  const [runtimeDetectionError, setRuntimeDetectionError] = useState("");
 
-  const runtime = mockRuntimes[selectedRuntime];
+  const runtime = useMemo(
+    () => ({
+      ...mockRuntimes[selectedRuntime],
+      ...runtimeStatuses[selectedRuntime],
+    }),
+    [runtimeStatuses, selectedRuntime],
+  );
   const selectedOperationNode = useMemo(
     () => operationNodes.find((node) => node.id === selectedOperation) ?? operationNodes[0],
     [selectedOperation],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!hasTauriCommandBridge()) {
+      setRuntimeDetectionState("error");
+      setRuntimeDetectionError("Tauri command bridge unavailable in browser preview.");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    invoke<RuntimeInstallStatus[]>("detect_runtime_install_statuses")
+      .then((statuses) => {
+        if (cancelled) {
+          return;
+        }
+
+        setRuntimeStatuses(normalizeRuntimeStatuses(statuses));
+        setRuntimeDetectionState("ready");
+        setRuntimeDetectionError("");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
+        setRuntimeDetectionState("error");
+        setRuntimeDetectionError(error instanceof Error ? error.message : String(error));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function selectRuntime(product: RuntimeProduct) {
     const nextRuntime = mockRuntimes[product];
@@ -257,6 +301,8 @@ export function App() {
             selectedOperation={selectedOperation}
             selectedOperationNode={selectedOperationNode}
             selectedRuntime={selectedRuntime}
+            runtimeDetectionError={runtimeDetectionError}
+            runtimeDetectionState={runtimeDetectionState}
             setExpandedItem={setExpandedItem}
             setSelectedItem={setSelectedItem}
             setSelectedOperation={setSelectedOperation}
@@ -277,17 +323,21 @@ function DashboardView({
   selectedOperation,
   selectedOperationNode,
   selectedRuntime,
+  runtimeDetectionError,
+  runtimeDetectionState,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
   setSelectedRuntime,
 }: {
   expandedItem: string;
-  runtime: MockRuntime;
+  runtime: DashboardRuntime;
   selectedItem: string;
   selectedOperation: OperationNode;
   selectedOperationNode: { id: OperationNode; label: string; description: string };
   selectedRuntime: RuntimeProduct;
+  runtimeDetectionError: string;
+  runtimeDetectionState: "loading" | "ready" | "error";
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -312,6 +362,8 @@ function DashboardView({
           全局环境变量
         </button>
       </section>
+
+      <RuntimeDetectionNotice state={runtimeDetectionState} error={runtimeDetectionError} />
 
       {runtime.installed ? (
         <InstalledDashboard
@@ -342,7 +394,7 @@ function InstalledDashboard({
   setSelectedOperation,
 }: {
   expandedItem: string;
-  runtime: MockRuntime;
+  runtime: DashboardRuntime;
   selectedItem: string;
   selectedOperation: OperationNode;
   selectedOperationNode: { id: OperationNode; label: string; description: string };
@@ -355,25 +407,32 @@ function InstalledDashboard({
       <section className="runtimeStatus" aria-label={`${runtime.label} runtime status`}>
         <div>
           <span>CLI</span>
-          <strong>{runtime.cliPath}</strong>
+          <strong>{runtime.cliPath ?? "未检测到"}</strong>
         </div>
         <div>
           <span>Version</span>
-          <strong>{runtime.version}</strong>
+          <strong>{runtime.version ?? "未读取到"}</strong>
         </div>
         <div>
           <span>Home / config</span>
-          <strong>{runtime.homeDir}</strong>
+          <strong>{runtime.configPath ?? runtime.homeDir ?? "未检测到"}</strong>
         </div>
         <div>
           <span>Gateway</span>
-          <strong>{runtime.gateway}</strong>
+          <strong>{formatGateway(runtime.gatewayRunning)}</strong>
         </div>
         <div>
           <span>Confidence</span>
-          <strong>{runtime.confidence}</strong>
+          <strong>{runtime.detectionConfidence}</strong>
         </div>
       </section>
+      {runtime.warnings.length > 0 ? (
+        <section className="runtimeWarnings" aria-label={`${runtime.label} runtime warnings`}>
+          {runtime.warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </section>
+      ) : null}
 
       <section className="managementLayout">
         <article className="treePanel">
@@ -464,24 +523,58 @@ function InstalledDashboard({
   );
 }
 
-function NotInstalledDashboard({ runtime }: { runtime: MockRuntime }) {
+function NotInstalledDashboard({ runtime }: { runtime: DashboardRuntime }) {
   return (
     <section className="notInstalledPanel">
       <div>
         <p className="eyebrow">未安装状态</p>
-        <h3>{runtime.label} 未安装，是否需要安装？</h3>
+        <h3>{runtime.label} 未安装</h3>
       </div>
       <p>
-        后续安装流程将以官方安装方式为准，先展示命令预览，再让用户选择安装方式和安装位置。
-        当前区域仅用于布局验证，不会执行命令或访问网络。
+        当前只完成只读检测：CLI、版本和默认 home/config 目录。后续安装流程将以官方安装方式为准，
+        先展示命令预览，再让用户选择安装方式和安装位置。本轮不会执行安装命令或访问网络。
       </p>
       <button type="button" disabled>
         安装 {runtime.label}
       </button>
       <div className="commandPreview">
-        <span>命令预览占位</span>
-        <code># official {runtime.label} install command preview</code>
+        <span>检测结果</span>
+        <code>
+          CLI: {runtime.cliPath ?? "not found"} | Home/config: {runtime.configPath ?? runtime.homeDir ?? "not found"} |
+          Confidence: {runtime.detectionConfidence}
+        </code>
       </div>
+      {runtime.warnings.length > 0 ? (
+        <div className="notInstalledWarnings">
+          {runtime.warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function RuntimeDetectionNotice({
+  error,
+  state,
+}: {
+  error: string;
+  state: "loading" | "ready" | "error";
+}) {
+  if (state === "ready") {
+    return null;
+  }
+
+  return (
+    <section className={state === "error" ? "runtimeDetectionNotice runtimeDetectionNoticeWarning" : "runtimeDetectionNotice"}>
+      {state === "loading" ? "正在只读检测 OpenClaw / Hermes 安装状态..." : null}
+      {state === "error" ? (
+        <>
+          <strong>当前使用本地 fallback 状态</strong>
+          <span>{error || "Tauri command bridge unavailable."}</span>
+        </>
+      ) : null}
     </section>
   );
 }
@@ -582,4 +675,92 @@ function routeTitle(route: DockRoute) {
     return "Settings";
   }
   return "Dashboard";
+}
+
+function normalizeRuntimeStatuses(statuses: RuntimeInstallStatus[]): Record<RuntimeProduct, RuntimeInstallStatus> {
+  const fallback = getEmptyRuntimeStatuses();
+
+  for (const status of statuses) {
+    if (status.product === "openclaw" || status.product === "hermes") {
+      fallback[status.product] = {
+        ...fallback[status.product],
+        ...status,
+        warnings: status.warnings ?? [],
+      };
+    }
+  }
+
+  return fallback;
+}
+
+function getEmptyRuntimeStatuses(): Record<RuntimeProduct, RuntimeInstallStatus> {
+  return {
+    openclaw: {
+      product: "openclaw",
+      installed: false,
+      gatewayRunning: null,
+      detectionConfidence: "unknown",
+      warnings: ["No reliable OpenClaw CLI or home/config evidence was found."],
+    },
+    hermes: {
+      product: "hermes",
+      installed: false,
+      gatewayRunning: null,
+      detectionConfidence: "unknown",
+      warnings: ["No reliable Hermes CLI or home/config evidence was found."],
+    },
+  };
+}
+
+function getBrowserRuntimeDetectionFallback(): Record<RuntimeProduct, RuntimeInstallStatus> {
+  if (typeof window === "undefined") {
+    return getEmptyRuntimeStatuses();
+  }
+
+  const fixture =
+    new URLSearchParams(window.location.search).get("agentdockRuntimeFixture") ??
+    window.localStorage.getItem("agentdockRuntimeFixture");
+
+  if (fixture !== "installed") {
+    return getEmptyRuntimeStatuses();
+  }
+
+  return {
+    openclaw: {
+      product: "openclaw",
+      installed: true,
+      cliPath: "/mock/bin/openclaw",
+      version: "openclaw 0.0.0-fixture",
+      homeDir: "/mock/home/.openclaw",
+      configPath: "/mock/home/.openclaw",
+      gatewayRunning: null,
+      detectionConfidence: "high",
+      warnings: ["Browser fixture only; desktop runtime uses the Tauri detection command."],
+    },
+    hermes: {
+      product: "hermes",
+      installed: true,
+      cliPath: "/mock/bin/hermes",
+      version: "hermes 0.0.0-fixture",
+      homeDir: "/mock/home/.hermes",
+      configPath: "/mock/home/.hermes",
+      gatewayRunning: null,
+      detectionConfidence: "high",
+      warnings: ["Browser fixture only; desktop runtime uses the Tauri detection command."],
+    },
+  };
+}
+
+function formatGateway(gatewayRunning?: boolean | null) {
+  if (gatewayRunning === true) {
+    return "运行中";
+  }
+  if (gatewayRunning === false) {
+    return "未运行";
+  }
+  return "未检查";
+}
+
+function hasTauriCommandBridge() {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }

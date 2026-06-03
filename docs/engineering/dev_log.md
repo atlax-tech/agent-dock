@@ -1,5 +1,81 @@
 # AgentDock Development Log
 
+## 2026-06-03 - Phase 1 Runtime Detection Read-only
+
+### Task Goal
+
+Implement the minimum read-only runtime detection loop for OpenClaw and Hermes
+and make the Dashboard runtime switch render installed / not installed from
+real detection results instead of hard-coded mock install state.
+
+### Files Changed
+
+- `apps/desktop/src-tauri/src/commands/runtime_detection.rs`
+- `apps/desktop/src-tauri/src/commands/mod.rs`
+- `apps/desktop/src-tauri/src/lib.rs`
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added `detect_runtime_install_statuses`, a read-only Tauri command returning
+  `RuntimeInstallStatus` entries for OpenClaw and Hermes.
+- OpenClaw detection checks the `openclaw` CLI in `PATH`,
+  `openclaw --version`, and `~/.openclaw/`.
+- Hermes detection checks the `hermes` CLI in `PATH`, `hermes --version`,
+  `$HERMES_HOME`, and `~/.hermes/`.
+- Returned fields include product, installed, cli path, version, home dir,
+  config path, gateway status placeholder, detection confidence, and warnings.
+- Dashboard now renders installed / not installed state from detection output.
+- Browser-only preview keeps a local fallback and an explicit installed fixture
+  query for UI validation when the Tauri command bridge is unavailable.
+
+### Confidence Rules
+
+- `high`: CLI exists, version was read, and home/config directory exists.
+- `medium`: CLI exists, even if version or home/config is missing.
+- `low`: only residual home/config directory evidence exists.
+- `unknown`: no reliable CLI or home/config evidence exists.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed with
+  runtime detection tests covering absent CLI/home and mocked installed states.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- Browser fallback DOM check at `http://127.0.0.1:1420/`: Dashboard rendered
+  OpenClaw not installed with unknown confidence.
+- Browser fixture DOM check at
+  `http://127.0.0.1:1420/?agentdockRuntimeFixture=installed`: Dashboard
+  rendered installed status with fixture version, home/config, and high
+  confidence.
+
+### Boundary Confirmation
+
+- No install, uninstall, migration, Provider, permission, channel, scheduled
+  task, session, memory, skill, secret migration, cloud, account, or telemetry
+  behavior was implemented.
+- No session or memory full content is read.
+- No OpenClaw or Hermes config files are modified.
+- OpenClaw and Hermes detection candidates remain runtime-specific.
+
+### Risks
+
+- CLI detection depends on the desktop process `PATH`; macOS GUI launches may
+  expose a different `PATH` than an interactive shell.
+- Gateway detection remains intentionally unimplemented and returns `None` /
+  `未检查`.
+- Low confidence currently means a home/config directory exists without CLI
+  evidence; future install/uninstall flows must treat this as read-only residue.
+
+### Next Step
+
+Add a desktop-runtime UI test path or command-level fixture hook so the Tauri
+Dashboard can be validated without relying on browser fallback fixtures, then
+continue with an explicit install-plan preview slice.
+
 ## 2026-06-02 - Phase 0 Bootstrap
 
 ### Phase
