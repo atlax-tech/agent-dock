@@ -65,7 +65,8 @@ button {
 .notInstalledPanel h3,
 .migrationColumn h3,
 .settingsHeader h3,
-.settingsModule h4 {
+.settingsModule h4,
+.migrationNotice strong {
   margin: 0;
 }
 
@@ -147,7 +148,8 @@ button {
 .secondaryButton,
 .addAgentButton,
 .notInstalledPanel button,
-.migrationControls button {
+.migrationControls button,
+.settingsFooter button {
   min-height: 38px;
   padding: 0 14px;
   border-radius: 8px;
@@ -165,7 +167,8 @@ button {
 .secondaryButton:disabled,
 .addAgentButton:disabled,
 .notInstalledPanel button:disabled,
-.migrationControls button:disabled {
+.migrationControls button:disabled,
+.settingsFooter button:disabled {
   color: #6c7773;
   cursor: not-allowed;
 }
@@ -238,16 +241,15 @@ button {
 .managementLayout {
   display: grid;
   grid-template-columns: minmax(290px, 0.78fr) minmax(420px, 1.22fr);
-  gap: 14px;
-  min-height: 560px;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #ffffff;
 }
 
-.treePanel,
-.operationPane,
 .notInstalledPanel,
-.migrationColumn,
-.migrationControls,
-.settingsWorkspace {
+.migrationColumn {
   border: 1px solid #dce2df;
   border-radius: 8px;
   background: #ffffff;
@@ -256,9 +258,12 @@ button {
 .treePanel,
 .operationPane,
 .notInstalledPanel,
-.migrationColumn,
-.migrationControls {
+.migrationColumn {
   padding: 16px;
+}
+
+.treePanel {
+  border-right: 1px solid #dce2df;
 }
 
 .panelHeader h3,
@@ -272,14 +277,17 @@ button {
 
 .accordionTree {
   display: grid;
-  gap: 8px;
-  margin-top: 14px;
+  gap: 2px;
+  margin-top: 12px;
 }
 
 .agentAccordion {
-  border: 1px solid #e2e8e5;
-  border-radius: 8px;
+  border-bottom: 1px solid #edf1ef;
   overflow: hidden;
+}
+
+.agentAccordion:first-child {
+  border-top: 1px solid #edf1ef;
 }
 
 .agentHeader {
@@ -290,21 +298,21 @@ button {
   min-height: 42px;
   padding: 0 12px;
   color: #233339;
-  background: #f6f8f7;
+  background: transparent;
   cursor: pointer;
   text-align: left;
 }
 
 .agentHeaderActive {
-  background: #e4efeb;
+  background: #edf5f2;
   font-weight: 750;
 }
 
 .operationList {
   display: grid;
-  gap: 4px;
-  padding: 8px;
-  background: #ffffff;
+  gap: 2px;
+  padding: 4px 0 8px 14px;
+  background: #fbfcfb;
 }
 
 .operationItem {
@@ -330,6 +338,7 @@ button {
 .addAgentButton {
   width: 100%;
   margin-top: 14px;
+  background: #f1f5f3;
 }
 
 .operationPane {
@@ -341,7 +350,8 @@ button {
 .operationPane p,
 .notInstalledPanel p,
 .settingsModule p,
-.migrationNotice span {
+.migrationNotice span,
+.migrationControls p {
   margin: 0;
   color: #485852;
   line-height: 1.55;
@@ -350,18 +360,18 @@ button {
 .paneMeta {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1px;
-  overflow: hidden;
   margin: 0;
-  border: 1px solid #dce2df;
-  border-radius: 8px;
-  background: #dce2df;
+  border-top: 1px solid #dce2df;
+  border-bottom: 1px solid #dce2df;
 }
 
 .paneMeta div {
   min-width: 0;
-  padding: 12px;
-  background: #f8faf9;
+  padding: 10px 12px;
+}
+
+.paneMeta div + div {
+  border-left: 1px solid #e3e9e6;
 }
 
 .paneMeta dt {
@@ -385,10 +395,10 @@ button {
 
 .safetyList span,
 .policyGrid span {
-  padding: 11px 12px;
-  border-radius: 8px;
+  padding: 9px 10px;
+  border-radius: 6px;
   color: #31515b;
-  background: #edf5f2;
+  background: #f1f6f4;
   font-size: 13px;
   font-weight: 650;
 }
@@ -396,7 +406,6 @@ button {
 .notInstalledPanel {
   display: grid;
   gap: 16px;
-  min-height: 420px;
   align-content: start;
 }
 
@@ -418,22 +427,28 @@ button {
   white-space: normal;
 }
 
+.migrationPage {
+  display: grid;
+  gap: 12px;
+}
+
 .migrationWorkspace {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(220px, 0.72fr) minmax(240px, 1fr);
-  gap: 14px;
-  min-height: 620px;
+  grid-template-columns: minmax(260px, 1fr) minmax(132px, 0.28fr) minmax(260px, 1fr);
+  gap: 12px;
 }
 
 .migrationColumn,
 .migrationControls {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .migrationControls {
-  justify-content: center;
+  align-items: center;
+  justify-content: start;
+  padding: 56px 8px 0;
 }
 
 .migrationList {
@@ -444,30 +459,54 @@ button {
 .migrationList button {
   min-height: 42px;
   padding: 0 12px;
-  border-radius: 8px;
+  border-radius: 6px;
   color: #233339;
-  background: #f6f8f7;
+  background: #f8faf9;
   text-align: left;
 }
 
 .migrationNotice {
-  display: grid;
-  gap: 8px;
-  padding: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #dce8e3;
   border-radius: 8px;
-  background: #edf5f2;
+  background: #f4f8f6;
+  flex-wrap: wrap;
+}
+
+.migrationNotice strong {
+  color: #20363f;
+  font-size: 14px;
+}
+
+.migrationNotice span {
+  font-size: 13px;
+}
+
+.directionButton {
+  width: 100%;
+  min-width: 132px;
+  white-space: nowrap;
 }
 
 .settingsWorkspace {
   display: grid;
-  gap: 14px;
-  padding: 16px;
-  min-height: 620px;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.settingsHeader {
+  padding: 16px 18px;
+  border-bottom: 1px solid #dce2df;
 }
 
 .settingsList {
   display: grid;
-  gap: 10px;
 }
 
 .settingsModule {
@@ -475,10 +514,9 @@ button {
   grid-template-columns: minmax(0, 1fr) minmax(180px, 0.35fr);
   gap: 18px;
   align-items: center;
-  padding: 14px;
-  border: 1px solid #e2e8e5;
-  border-radius: 8px;
-  background: #fdfefe;
+  padding: 14px 18px;
+  border-bottom: 1px solid #edf1ef;
+  background: #ffffff;
 }
 
 .settingsModule h4 {
@@ -493,6 +531,21 @@ button {
   text-align: right;
 }
 
+.settingsFooter {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  background: #fbfcfb;
+}
+
+.settingsFooter button {
+  min-height: 32px;
+  padding: 0 10px;
+  background: transparent;
+}
+
 @media (max-width: 960px) {
   .runtimeStatus,
   .managementLayout,
@@ -502,6 +555,29 @@ button {
   .policyGrid,
   .settingsModule {
     grid-template-columns: 1fr;
+  }
+
+  .treePanel,
+  .paneMeta div + div {
+    border-right: 0;
+    border-left: 0;
+  }
+
+  .treePanel {
+    border-bottom: 1px solid #dce2df;
+  }
+
+  .migrationControls {
+    padding: 0;
+  }
+
+  .directionButton {
+    width: auto;
+  }
+
+  .migrationNotice {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

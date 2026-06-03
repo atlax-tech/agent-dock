@@ -870,3 +870,67 @@ modules.
 After UI acceptance, either split the frontend scaffold into stable components
 or add a read-only runtime status view model without scanning real
 OpenClaw/Hermes home directories.
+
+## 2026-06-03 - 003 Frontend Layout Density And Surface Refinement
+
+### Task Goal
+
+Implement `003-frontend-layout-density-and-surface-refinement` to make the
+002 read-only shell feel like a focused local desktop manager instead of a
+demo-like card dashboard.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Kept the Dashboard runtime status strip and agent/profile accordion tree.
+- Refined the installed Dashboard lower area into one connected management
+  workspace with a shared surface and light separator between the tree and
+  OperationPane.
+- Removed the large forced management min-height and reduced nested boxed
+  surfaces in the tree, metadata, and safety rows.
+- Moved the Migration preview requirement to a page-level notice directly under
+  the Migration page title area.
+- Kept Migration as three columns while making OpenClaw and Hermes columns
+  dominant and replacing the two large direction buttons with one compact
+  direction placeholder.
+- Removed `Footer links` from the Settings module data and rendered GitHub,
+  Buy me a coffee, Version, Updates, and Privacy as footer content.
+- Changed Settings modules from independent cards into grouped rows in a
+  continuous settings workspace.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed,
+  52 tests.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `rg -n "@tauri-apps/api/core|invoke\\(" apps/desktop/src/app/App.tsx`: no output.
+- `rg -n "scan_default_candidates|scan_fixture_roots|scan_selected_root|apply_create_agent|apply_create_profile|apply_duplicate_agent|apply_delete_agent|apply_model_provider_update|apply_personality_update|restore_personality_backup|apply_restore_trash_item" apps/desktop/src/app/App.tsx`: no output.
+- `git diff --name-only`: only `apps/desktop/src/app/App.tsx` and
+  `apps/desktop/src/app/styles.css` before this log entry.
+
+### Result
+
+The visible frontend remains read-only and mock-data-only, but the Dashboard,
+Migration, and Settings surfaces now use lighter separators, tighter spacing,
+and grouped desktop-app structure instead of large independent cards.
+Rust/Tauri files were unchanged.
+
+### Risks
+
+- This is still a visual-only refinement backed by mock runtime data.
+- No manual desktop visual QA has been performed in this round.
+- The current frontend remains in one file and may need component extraction
+  after the UI contract stabilizes.
+
+### Next Step
+
+Either run a manual desktop visual pass for density/responsiveness or start the
+first read-only runtime status view-model slice without scanning real
+OpenClaw/Hermes home directories.

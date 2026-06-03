@@ -148,12 +148,9 @@ const settingsModules = [
     status: "白天 / 深夜",
     detail: "点击顶部主题按钮切换；根据系统设置的下拉选项保留为后续能力。",
   },
-  {
-    title: "Footer links",
-    status: "GitHub / Buy me a coffee / Version / Updates / Privacy",
-    detail: "底部链接模块占位，后续连接开源仓库、赞助、版本、产品更新和隐私声明。",
-  },
 ];
+
+const settingsFooterLinks = ["GitHub", "Buy me a coffee", "Version", "Updates", "Privacy"];
 
 export function App() {
   const [activeRoute, setActiveRoute] = useState<DockRoute>("dashboard");
@@ -468,48 +465,49 @@ function MigrationView() {
   const hermesProfiles = mockRuntimes.hermes.items;
 
   return (
-    <section className="migrationWorkspace">
-      <article className="migrationColumn">
-        <div>
-          <p className="eyebrow">OpenClaw agents</p>
-          <h3>OpenClaw</h3>
-        </div>
-        <div className="migrationList">
-          {openclawAgents.map((agent) => (
-            <button type="button" key={agent}>
-              {agent}
-            </button>
-          ))}
-        </div>
-      </article>
+    <section className="migrationPage">
+      <div className="migrationNotice" aria-label="Migration preview policy">
+        <strong>保存前必须预览</strong>
+        <span>迁移会先生成预览、diff、备份计划和风险提示。</span>
+        <span>secret、token、auth、cookies、encrypted store、channel pairing state 不会自动迁移。</span>
+      </div>
 
-      <article className="migrationControls">
-        <button type="button" disabled>
-          OpenClaw → Hermes
-        </button>
-        <button type="button" disabled>
-          Hermes → OpenClaw
-        </button>
-        <div className="migrationNotice">
-          <strong>保存前必须预览</strong>
-          <span>迁移会先生成预览、diff、备份计划和风险提示。</span>
-          <span>secret、token、auth、cookies、encrypted store、channel pairing state 不会自动迁移。</span>
-        </div>
-      </article>
+      <div className="migrationWorkspace">
+        <article className="migrationColumn">
+          <div>
+            <p className="eyebrow">OpenClaw agents</p>
+            <h3>OpenClaw</h3>
+          </div>
+          <div className="migrationList">
+            {openclawAgents.map((agent) => (
+              <button type="button" key={agent}>
+                {agent}
+              </button>
+            ))}
+          </div>
+        </article>
 
-      <article className="migrationColumn">
-        <div>
-          <p className="eyebrow">Hermes profiles</p>
-          <h3>Hermes</h3>
-        </div>
-        <div className="migrationList">
-          {hermesProfiles.map((profile) => (
-            <button type="button" key={profile}>
-              {profile}
-            </button>
-          ))}
-        </div>
-      </article>
+        <article className="migrationControls">
+          <button className="directionButton" type="button" disabled aria-label="Switch migration direction">
+            OpenClaw ⇄ Hermes
+          </button>
+          <p>选择两侧条目后在这里切换迁移方向；当前仅为布局占位。</p>
+        </article>
+
+        <article className="migrationColumn">
+          <div>
+            <p className="eyebrow">Hermes profiles</p>
+            <h3>Hermes</h3>
+          </div>
+          <div className="migrationList">
+            {hermesProfiles.map((profile) => (
+              <button type="button" key={profile}>
+                {profile}
+              </button>
+            ))}
+          </div>
+        </article>
+      </div>
     </section>
   );
 }
@@ -532,6 +530,13 @@ function SettingsView() {
           </article>
         ))}
       </div>
+      <footer className="settingsFooter" aria-label="Settings footer links">
+        {settingsFooterLinks.map((link) => (
+          <button type="button" key={link} disabled>
+            {link}
+          </button>
+        ))}
+      </footer>
     </section>
   );
 }
