@@ -1041,6 +1041,68 @@ button {
   background: #e8f0ec;
 }
 
+.deletePlanPreview .previewConfirmButton {
+  justify-self: start;
+  padding: 8px 16px;
+  border-radius: 6px;
+  color: #ffffff;
+  background: #b42318;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.deletePlanPreview .previewConfirmButton:hover:not(:disabled) {
+  background: #9a1e15;
+}
+
+.deletePlanPreview .previewConfirmButton:disabled {
+  background: #e8b8b8;
+  color: #7a4444;
+  cursor: not-allowed;
+}
+
+.deletePlanPreview .previewSelectionMismatch {
+  padding: 10px 12px;
+  border: 1px solid #ead8b8;
+  border-radius: 8px;
+  color: #5a4724;
+  background: #fff8ea;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.deletePlanPreview .previewSuccess {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #c4e0d4;
+  border-radius: 8px;
+  color: #174f42;
+  background: #e8f5ee;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.deletePlanPreview .previewSuccess strong {
+  font-size: 14px;
+}
+
+.deletePlanPreview .previewError {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e8b8b8;
+  border-radius: 8px;
+  color: #7a2222;
+  background: #fff0f0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.deletePlanPreview .previewError strong {
+  font-size: 14px;
+}
+
 @media (max-width: 960px) {
   .runtimeStatus,
   .managementLayout,

@@ -103,6 +103,16 @@ type DeleteAgentMutationPlan = {
   blockedReason?: string | null;
 };
 
+type DeleteAgentMutationResult = {
+  product: string;
+  agentId: string;
+  operation: string;
+  sourcePath: string;
+  trashTargetPath: string;
+  backupPath: string;
+  registryPath: string;
+};
+
 type AgentScanSource = "desktop" | "fixture" | "empty";
 type ScanProgressState = "hidden" | "scanning" | "complete";
 type DashboardRuntime = MockRuntime & RuntimeInstallStatus;
@@ -246,6 +256,13 @@ export function App() {
   const [runtimeUpdateState, setRuntimeUpdateState] = useState<"idle" | "running" | "success" | "error">("idle");
   const [runtimeUpdateMessage, setRuntimeUpdateMessage] = useState("");
   const [deleteAgentPlan, setDeleteAgentPlan] = useState<DeleteAgentMutationPlan | null>(null);
+  const [deleteAgentApplyState, setDeleteAgentApplyState] = useState<
+    "idle" | "running" | "success" | "error"
+  >("idle");
+  const [deleteAgentApplyResult, setDeleteAgentApplyResult] = useState<
+    DeleteAgentMutationResult | null
+  >(null);
+  const [deleteAgentApplyError, setDeleteAgentApplyError] = useState("");
 
   const runtime = useMemo(
     () => ({
@@ -425,6 +442,43 @@ export function App() {
       });
   }
 
+  function dismissDeletePlan() {
+    setDeleteAgentPlan(null);
+    setDeleteAgentApplyState("idle");
+    setDeleteAgentApplyResult(null);
+    setDeleteAgentApplyError("");
+  }
+
+  function applyDeleteAgentPlan(plan: DeleteAgentMutationPlan) {
+    if (!hasTauriCommandBridge()) {
+      setDeleteAgentApplyState("error");
+      setDeleteAgentApplyError("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setDeleteAgentApplyState("running");
+    setDeleteAgentApplyError("");
+    invoke<DeleteAgentMutationResult>("apply_delete_agent_mutation_plan", {
+      request: { plan },
+    })
+      .then((result) => {
+        setDeleteAgentApplyState("success");
+        setDeleteAgentApplyResult(result);
+        // Do NOT call setDeleteAgentPlan(null) here.
+        // The success notice is rendered inside the preview surface
+        // (conditionally on deleteAgentPlan being non-null).
+        // Clearing deleteAgentPlan would unmount the preview and hide
+        // the success result before the user sees it.
+        // State is cleared only when the user clicks Close/Cancel.
+        setRescanRequestId((current) => current + 1);
+        setRuntimeDetectionRequestId((current) => current + 1);
+      })
+      .catch((error: unknown) => {
+        setDeleteAgentApplyState("error");
+        setDeleteAgentApplyError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
   function requestDeleteAgentPlan(agent: ManagedAgent) {
     if (!hasTauriCommandBridge()) {
       console.warn("Tauri command bridge unavailable; delete-agent plan was not requested.");
@@ -440,6 +494,9 @@ export function App() {
     })
       .then((plan) => {
         setDeleteAgentPlan(plan);
+        setDeleteAgentApplyState("idle");
+        setDeleteAgentApplyResult(null);
+        setDeleteAgentApplyError("");
       })
       .catch((error: unknown) => {
         console.error("Failed to create delete-agent MutationPlan", error);
@@ -540,7 +597,11 @@ export function App() {
             onRequestRuntimeUpdate={requestRuntimeUpdate}
             onRequestDeleteAgentPlan={requestDeleteAgentPlan}
             deleteAgentPlan={deleteAgentPlan}
-            onDismissDeletePlan={() => setDeleteAgentPlan(null)}
+            onDismissDeletePlan={dismissDeletePlan}
+            onApplyDeleteAgentPlan={applyDeleteAgentPlan}
+            deleteAgentApplyState={deleteAgentApplyState}
+            deleteAgentApplyError={deleteAgentApplyError}
+            deleteAgentApplyResult={deleteAgentApplyResult}
             setExpandedItem={setExpandedItem}
             setSelectedItem={setSelectedItem}
             setSelectedOperation={setSelectedOperation}
@@ -576,6 +637,10 @@ function DashboardView({
   onRequestDeleteAgentPlan,
   deleteAgentPlan,
   onDismissDeletePlan,
+  onApplyDeleteAgentPlan,
+  deleteAgentApplyState,
+  deleteAgentApplyError,
+  deleteAgentApplyResult,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -602,6 +667,10 @@ function DashboardView({
   onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
   deleteAgentPlan: DeleteAgentMutationPlan | null;
   onDismissDeletePlan: () => void;
+  onApplyDeleteAgentPlan: (plan: DeleteAgentMutationPlan) => void;
+  deleteAgentApplyState: "idle" | "running" | "success" | "error";
+  deleteAgentApplyError: string;
+  deleteAgentApplyResult: DeleteAgentMutationResult | null;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -666,6 +735,10 @@ function DashboardView({
           onRequestDeleteAgentPlan={onRequestDeleteAgentPlan}
           deleteAgentPlan={deleteAgentPlan}
           onDismissDeletePlan={onDismissDeletePlan}
+          onApplyDeleteAgentPlan={onApplyDeleteAgentPlan}
+          deleteAgentApplyState={deleteAgentApplyState}
+          deleteAgentApplyError={deleteAgentApplyError}
+          deleteAgentApplyResult={deleteAgentApplyResult}
         />
       ) : (
         <NotInstalledDashboard runtime={runtime} />
@@ -711,6 +784,10 @@ function InstalledDashboard({
   onRequestDeleteAgentPlan,
   deleteAgentPlan,
   onDismissDeletePlan,
+  onApplyDeleteAgentPlan,
+  deleteAgentApplyState,
+  deleteAgentApplyError,
+  deleteAgentApplyResult,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -731,6 +808,10 @@ function InstalledDashboard({
   onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
   deleteAgentPlan: DeleteAgentMutationPlan | null;
   onDismissDeletePlan: () => void;
+  onApplyDeleteAgentPlan: (plan: DeleteAgentMutationPlan) => void;
+  deleteAgentApplyState: "idle" | "running" | "success" | "error";
+  deleteAgentApplyError: string;
+  deleteAgentApplyResult: DeleteAgentMutationResult | null;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -833,6 +914,10 @@ function InstalledDashboard({
               onRequestDeleteAgentPlan={onRequestDeleteAgentPlan}
               deleteAgentPlan={deleteAgentPlan}
               onDismissDeletePlan={onDismissDeletePlan}
+              onApplyDeleteAgentPlan={onApplyDeleteAgentPlan}
+              deleteAgentApplyState={deleteAgentApplyState}
+              deleteAgentApplyError={deleteAgentApplyError}
+              deleteAgentApplyResult={deleteAgentApplyResult}
             />
           ) : (
             <PlaceholderOperationPane
@@ -853,12 +938,20 @@ function BasicSettingsPane({
   selectedAgent,
   deleteAgentPlan,
   onDismissDeletePlan,
+  onApplyDeleteAgentPlan,
+  deleteAgentApplyState,
+  deleteAgentApplyError,
+  deleteAgentApplyResult,
 }: {
   onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
   runtime: DashboardRuntime;
   selectedAgent: ManagedAgent | null;
   deleteAgentPlan: DeleteAgentMutationPlan | null;
   onDismissDeletePlan: () => void;
+  onApplyDeleteAgentPlan: (plan: DeleteAgentMutationPlan) => void;
+  deleteAgentApplyState: "idle" | "running" | "success" | "error";
+  deleteAgentApplyError: string;
+  deleteAgentApplyResult: DeleteAgentMutationResult | null;
 }) {
   if (!selectedAgent) {
     return (
@@ -994,15 +1087,58 @@ function BasicSettingsPane({
             <div className="previewBlocked">{deleteAgentPlan.blockedReason}</div>
           ) : null}
           <div className="previewExplanation">
-            这不会永久删除文件。AgentDock 会先创建备份，再将该 Agent/Profile 积入本地 Trash。移入后它会从 AgentDock 管理列表中移除；如果运行时或 channel 已缓存该 Agent，可能需要重启 Gateway 后才会完全失效。
+            这不会永久删除文件。AgentDock 会先创建备份，再将该 Agent/Profile 移入本地 Trash。移入后它会从 AgentDock 管理列表中移除；如果 Gateway 或 channel 已缓存该 Agent，可能需要重启 Gateway 后才会完全失效。
           </div>
-          <button
-            className="previewCancelButton"
-            type="button"
-            onClick={onDismissDeletePlan}
-          >
-            取消
-          </button>
+          {deleteAgentApplyState === "success" && deleteAgentApplyResult ? (
+            <div className="previewSuccess">
+              <strong>回收完成</strong>
+              <span>
+                该 Agent/Profile 已移入本地 Trash。备份已保存至 {deleteAgentApplyResult.backupPath}。
+                如果 Gateway 或 channel 已缓存该 Agent，可能需要重启 Gateway 后才会完全失效。
+              </span>
+              <button className="previewCancelButton" type="button" onClick={onDismissDeletePlan}>
+                关闭
+              </button>
+            </div>
+          ) : (
+            <>
+              {deleteAgentPlan.blockedReason ? null : (
+                <button
+                  className="previewConfirmButton"
+                  type="button"
+                  disabled={
+                    deleteAgentApplyState === "running" ||
+                    (deleteAgentPlan !== null &&
+                      (runtime.product !== deleteAgentPlan.product ||
+                        selectedAgent?.id !== deleteAgentPlan.agentId))
+                  }
+                  onClick={() => onApplyDeleteAgentPlan(deleteAgentPlan)}
+                >
+                  {deleteAgentApplyState === "running" ? "执行中..." : "确认移入回收站"}
+                </button>
+              )}
+              {deleteAgentPlan !== null &&
+              (runtime.product !== deleteAgentPlan.product ||
+                selectedAgent?.id !== deleteAgentPlan.agentId) ? (
+                <div className="previewSelectionMismatch">
+                  当前选中的 Agent/Profile 已变化，请重新生成回收计划。
+                </div>
+              ) : null}
+              <button
+                className="previewCancelButton"
+                type="button"
+                onClick={onDismissDeletePlan}
+              >
+                取消
+              </button>
+              {deleteAgentApplyState === "error" ? (
+                <div className="previewError">
+                  <strong>回收失败</strong>
+                  <span>{deleteAgentApplyError}</span>
+                </div>
+              ) : null}
+            </>
+          )}
         </section>
       ) : null}
     </>

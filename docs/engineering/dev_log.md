@@ -1,5 +1,81 @@
 # AgentDock Development Log
 
+## 2026-06-03 - Delete Agent Confirm Apply (017c)
+
+### Task Goal
+
+Wire `apply_delete_agent_mutation_plan` only after the existing 017b preview UI
+is visible and the user explicitly confirms. Add a confirm button labeled
+"确认移入回收站" inside the existing inline preview. Do not call apply from the
+trash icon. Do not add a new route, Trash page, drawer, or modal.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added `DeleteAgentMutationResult` type matching backend struct (camelCase via serde).
+- Added `deleteAgentApplyState`, `deleteAgentApplyResult`, `deleteAgentApplyError` state
+  variables to App component.
+- Added `dismissDeletePlan()` helper that clears all plan + apply state at once,
+  used by both Cancel and Close-after-success buttons.
+- Added `applyDeleteAgentPlan()` handler that invokes `apply_delete_agent_mutation_plan`
+  via Tauri, sets apply state to "running"/"success"/"error", and on success triggers
+  rescan + runtime detection refresh without clearing `deleteAgentPlan` (so the
+  success notice remains visible).
+- Updated `requestDeleteAgentPlan` to reset stale apply state when generating a new plan.
+- Added confirm button "确认移入回收站" inside the existing preview, disabled when
+  blockedReason exists, selection mismatch, or apply is running.
+- Added selection mismatch guard: when `runtime.product !== deleteAgentPlan.product`
+  or `selectedAgent.id !== deleteAgentPlan.agentId`, the confirm button is disabled
+  and a notice "当前选中的 Agent/Profile 已变化，请重新生成回收计划。" is shown.
+- On success: confirm and cancel buttons are hidden; only success notice + Close
+  button are rendered. No disabled red confirm button after success.
+- On error: preview stays open with error notice; confirm remains enabled for retry.
+- Fixed explanation copy: "移入" not "积入", "Gateway 或 channel" not "运行时或 channel".
+- Added CSS classes: `.previewConfirmButton`, `.previewSelectionMismatch`, `.previewSuccess`,
+  `.previewError`.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed (31 modules, 15.05 kB CSS, 220.27 kB JS).
+- `git diff --check`: passed.
+- `rg -n "apply_delete_agent_mutation_plan|applyDeleteAgentPlan|确认移入回收站" apps/desktop/src/app/App.tsx`:
+  4 hits confirming correct wiring (function definition, invoke call, prop pass, button label).
+- `git diff --stat`: 2 files changed, 207 insertions, 9 deletions.
+- `git status --short`: 2 modified files (App.tsx, styles.css).
+
+### Boundary Confirmation
+
+- Apply is NOT called from the trash icon (trash icon only generates plan).
+- Apply is called only when user clicks "确认移入回收站".
+- blockedReason hides the confirm button entirely.
+- Selection mismatch disables the confirm button and shows a notice.
+- Apply failure keeps preview open and shows error; confirm remains enabled for retry.
+- Apply success keeps preview mounted, shows success notice, hides confirm/cancel,
+  shows only Close button.
+- Close button after success calls `dismissDeletePlan()` which clears all state.
+- Cancel button before success calls `dismissDeletePlan()` which clears all state.
+- No new route, Trash page, drawer, or modal was added.
+- No Rust/Tauri files were modified.
+- No package dependencies were added.
+
+### Risks
+
+- Medium. Unlike 017b (read-only preview), this task wires a real filesystem
+  mutation. The backend `apply_delete_agent_mutation_plan` copies a backup then
+  moves the source directory to trash. If apply succeeds, the agent/profile
+  directory is moved and a backup exists. The user can restore from the backup
+  manually or via a future restore UI.
+
+### Next Step
+
+Add restore from Trash UI in follow-up task.
+
 ## 2026-06-03 - Delete Agent MutationPlan Preview UI (017b)
 
 ### Task Goal
