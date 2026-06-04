@@ -1103,6 +1103,59 @@ button {
   font-size: 14px;
 }
 
+.deletePlanPreview .previewRestoreButton {
+  justify-self: start;
+  padding: 8px 16px;
+  border-radius: 6px;
+  color: #174f42;
+  background: #e3f1ec;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.deletePlanPreview .previewRestoreButton:hover:not(:disabled) {
+  background: #c8e4d8;
+}
+
+.deletePlanPreview .previewRestoreButton:disabled {
+  color: #6c7773;
+  background: #f1f5f3;
+  cursor: not-allowed;
+}
+
+.restorePlanPreview {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.restorePlanPreview h4 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.25;
+  color: #233339;
+}
+
+.restorePlanPreview .detailGrid dd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.restorePlanPreview .previewExplanation {
+  padding: 10px 12px;
+  border: 1px solid #dce8e3;
+  border-radius: 8px;
+  color: #31515b;
+  background: #f4f8f6;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 @media (max-width: 960px) {
   .runtimeStatus,
   .managementLayout,

@@ -113,6 +113,15 @@ type DeleteAgentMutationResult = {
   registryPath: string;
 };
 
+type RestoreTrashItemPlan = {
+  planHash: string;
+  operation: string;
+  runtime: RuntimeProduct;
+  targetPath: string;
+  warnings: string[];
+  blockedReason?: string | null;
+};
+
 type AgentScanSource = "desktop" | "fixture" | "empty";
 type ScanProgressState = "hidden" | "scanning" | "complete";
 type DashboardRuntime = MockRuntime & RuntimeInstallStatus;
@@ -263,6 +272,11 @@ export function App() {
     DeleteAgentMutationResult | null
   >(null);
   const [deleteAgentApplyError, setDeleteAgentApplyError] = useState("");
+  const [restorePlan, setRestorePlan] = useState<RestoreTrashItemPlan | null>(null);
+  const [restorePlanRequestState, setRestorePlanRequestState] = useState<
+    "idle" | "loading" | "error"
+  >("idle");
+  const [restorePlanError, setRestorePlanError] = useState("");
 
   const runtime = useMemo(
     () => ({
@@ -442,11 +456,42 @@ export function App() {
       });
   }
 
+  function dismissRestorePlan() {
+    setRestorePlan(null);
+    setRestorePlanRequestState("idle");
+    setRestorePlanError("");
+  }
+
+  function requestRestorePlan(trashTargetPath: string) {
+    if (!hasTauriCommandBridge()) {
+      setRestorePlanRequestState("error");
+      setRestorePlanError("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setRestorePlanRequestState("loading");
+    setRestorePlanError("");
+    invoke<RestoreTrashItemPlan>("restore_trash_item_plan", {
+      trashPath: trashTargetPath,
+    })
+      .then((plan) => {
+        setRestorePlan(plan);
+        setRestorePlanRequestState("idle");
+      })
+      .catch((error: unknown) => {
+        setRestorePlanRequestState("error");
+        setRestorePlanError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
   function dismissDeletePlan() {
     setDeleteAgentPlan(null);
     setDeleteAgentApplyState("idle");
     setDeleteAgentApplyResult(null);
     setDeleteAgentApplyError("");
+    setRestorePlan(null);
+    setRestorePlanRequestState("idle");
+    setRestorePlanError("");
   }
 
   function applyDeleteAgentPlan(plan: DeleteAgentMutationPlan) {
@@ -602,6 +647,11 @@ export function App() {
             deleteAgentApplyState={deleteAgentApplyState}
             deleteAgentApplyError={deleteAgentApplyError}
             deleteAgentApplyResult={deleteAgentApplyResult}
+            restorePlan={restorePlan}
+            restorePlanRequestState={restorePlanRequestState}
+            restorePlanError={restorePlanError}
+            onRequestRestorePlan={requestRestorePlan}
+            onDismissRestorePlan={dismissRestorePlan}
             setExpandedItem={setExpandedItem}
             setSelectedItem={setSelectedItem}
             setSelectedOperation={setSelectedOperation}
@@ -641,6 +691,11 @@ function DashboardView({
   deleteAgentApplyState,
   deleteAgentApplyError,
   deleteAgentApplyResult,
+  restorePlan,
+  restorePlanRequestState,
+  restorePlanError,
+  onRequestRestorePlan,
+  onDismissRestorePlan,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -671,6 +726,11 @@ function DashboardView({
   deleteAgentApplyState: "idle" | "running" | "success" | "error";
   deleteAgentApplyError: string;
   deleteAgentApplyResult: DeleteAgentMutationResult | null;
+  restorePlan: RestoreTrashItemPlan | null;
+  restorePlanRequestState: "idle" | "loading" | "error";
+  restorePlanError: string;
+  onRequestRestorePlan: (trashTargetPath: string) => void;
+  onDismissRestorePlan: () => void;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -739,6 +799,11 @@ function DashboardView({
           deleteAgentApplyState={deleteAgentApplyState}
           deleteAgentApplyError={deleteAgentApplyError}
           deleteAgentApplyResult={deleteAgentApplyResult}
+          restorePlan={restorePlan}
+          restorePlanRequestState={restorePlanRequestState}
+          restorePlanError={restorePlanError}
+          onRequestRestorePlan={onRequestRestorePlan}
+          onDismissRestorePlan={onDismissRestorePlan}
         />
       ) : (
         <NotInstalledDashboard runtime={runtime} />
@@ -788,6 +853,11 @@ function InstalledDashboard({
   deleteAgentApplyState,
   deleteAgentApplyError,
   deleteAgentApplyResult,
+  restorePlan,
+  restorePlanRequestState,
+  restorePlanError,
+  onRequestRestorePlan,
+  onDismissRestorePlan,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -812,6 +882,11 @@ function InstalledDashboard({
   deleteAgentApplyState: "idle" | "running" | "success" | "error";
   deleteAgentApplyError: string;
   deleteAgentApplyResult: DeleteAgentMutationResult | null;
+  restorePlan: RestoreTrashItemPlan | null;
+  restorePlanRequestState: "idle" | "loading" | "error";
+  restorePlanError: string;
+  onRequestRestorePlan: (trashTargetPath: string) => void;
+  onDismissRestorePlan: () => void;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -918,6 +993,11 @@ function InstalledDashboard({
               deleteAgentApplyState={deleteAgentApplyState}
               deleteAgentApplyError={deleteAgentApplyError}
               deleteAgentApplyResult={deleteAgentApplyResult}
+              restorePlan={restorePlan}
+              restorePlanRequestState={restorePlanRequestState}
+              restorePlanError={restorePlanError}
+              onRequestRestorePlan={onRequestRestorePlan}
+              onDismissRestorePlan={onDismissRestorePlan}
             />
           ) : (
             <PlaceholderOperationPane
@@ -942,6 +1022,11 @@ function BasicSettingsPane({
   deleteAgentApplyState,
   deleteAgentApplyError,
   deleteAgentApplyResult,
+  restorePlan,
+  restorePlanRequestState,
+  restorePlanError,
+  onRequestRestorePlan,
+  onDismissRestorePlan,
 }: {
   onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
   runtime: DashboardRuntime;
@@ -952,6 +1037,11 @@ function BasicSettingsPane({
   deleteAgentApplyState: "idle" | "running" | "success" | "error";
   deleteAgentApplyError: string;
   deleteAgentApplyResult: DeleteAgentMutationResult | null;
+  restorePlan: RestoreTrashItemPlan | null;
+  restorePlanRequestState: "idle" | "loading" | "error";
+  restorePlanError: string;
+  onRequestRestorePlan: (trashTargetPath: string) => void;
+  onDismissRestorePlan: () => void;
 }) {
   if (!selectedAgent) {
     return (
@@ -1099,6 +1189,14 @@ function BasicSettingsPane({
               <button className="previewCancelButton" type="button" onClick={onDismissDeletePlan}>
                 关闭
               </button>
+              <button
+                className="previewRestoreButton"
+                type="button"
+                disabled={restorePlanRequestState === "loading" || restorePlan !== null}
+                onClick={() => onRequestRestorePlan(deleteAgentApplyResult.trashTargetPath)}
+              >
+                {restorePlanRequestState === "loading" ? "加载中..." : "生成恢复计划"}
+              </button>
             </div>
           ) : (
             <>
@@ -1139,6 +1237,52 @@ function BasicSettingsPane({
               ) : null}
             </>
           )}
+          {restorePlan ? (
+            <section className="restorePlanPreview" aria-label="Restore plan preview">
+              <h4>恢复计划预览</h4>
+              <dl className="detailGrid">
+                <div>
+                  <dt>操作</dt>
+                  <dd>{restorePlan.operation}</dd>
+                </div>
+                <div>
+                  <dt>恢复目标路径</dt>
+                  <dd>{restorePlan.targetPath}</dd>
+                </div>
+                <div>
+                  <dt>运行时</dt>
+                  <dd>{restorePlan.runtime === "openclaw" ? "OpenClaw" : "Hermes"}</dd>
+                </div>
+                <div>
+                  <dt>恢复计划哈希</dt>
+                  <dd>{restorePlan.planHash}</dd>
+                </div>
+              </dl>
+              {restorePlan.warnings.length > 0 ? (
+                <div className="warningList">
+                  {restorePlan.warnings.map((warning, index) => (
+                    <span key={index}>{warning}</span>
+                  ))}
+                </div>
+              ) : null}
+              {restorePlan.blockedReason ? (
+                <div className="previewBlocked">{restorePlan.blockedReason}</div>
+              ) : null}
+              <div className="previewExplanation">
+                这只是恢复计划的预览，不会移动任何文件。恢复会将该 Agent/Profile 从 Trash
+                移回到原始路径。如果原始路径已存在同名目录，恢复计划会被阻止。
+              </div>
+              <button className="previewCancelButton" type="button" onClick={onDismissRestorePlan}>
+                取消
+              </button>
+            </section>
+          ) : null}
+          {restorePlanRequestState === "error" && !restorePlan ? (
+            <div className="previewError">
+              <strong>生成恢复计划失败</strong>
+              <span>{restorePlanError}</span>
+            </div>
+          ) : null}
         </section>
       ) : null}
     </>

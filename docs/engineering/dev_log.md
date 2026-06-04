@@ -1,5 +1,88 @@
 # AgentDock Development Log
 
+## 2026-06-04 - Restore Plan Preview from Delete Success (018b)
+
+### Task Goal
+
+After 017c delete apply succeeds, add a small inline restore-plan preview
+path inside the existing delete success notice. When the user clicks
+"生成恢复计划", call `restore_trash_item_plan` with the trash target path,
+store the returned plan in frontend state, and render the restore plan preview
+inline below the success notice. This is a preview-only slice; no files are
+moved, no apply is called.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added `RestoreTrashItemPlan` type (minimal subset of backend `LifecyclePlan`):
+  planHash, operation, runtime, targetPath, warnings, blockedReason.
+- Added `restorePlan`, `restorePlanRequestState`, `restorePlanError` state
+  variables to App component.
+- Added `dismissRestorePlan()` helper that clears restore plan state.
+- Added `requestRestorePlan()` handler that invokes `restore_trash_item_plan`
+  via Tauri with `trashPath` argument.
+- Updated `dismissDeletePlan()` to also clear restore plan state, so Close/Cancel
+  on the delete success notice clears all related state at once.
+- Added "生成恢复计划" button in the delete success notice, disabled while
+  loading or when restore plan already exists.
+- Rendered restore plan preview inline below the success notice when
+  `restorePlan` is non-null. Preview shows: operation, target path, runtime,
+  plan hash, warnings, blockedReason, and explanation copy.
+- Restore preview cancel button clears restore state only; success notice
+  remains visible and "生成恢复计划" is re-enabled.
+- Restore plan request failure shows error notice below success notice;
+  "生成恢复计划" remains enabled for retry.
+- Added CSS classes: `.previewRestoreButton`, `.restorePlanPreview`,
+  `.restorePlanPreview .detailGrid dd`, `.restorePlanPreview .previewExplanation`.
+- No `apply_restore_trash_item` call was made.
+- No "确认恢复" button was added.
+- No Trash page, route, drawer, or modal was added.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed (31 modules, 15.92 kB CSS, 222.86 kB JS).
+- `git diff --check`: passed.
+- `rg -n "apply_restore_trash_item|确认恢复|永久删除|list_trash_items" App.tsx`:
+  no hits (forbidden patterns not present).
+- `rg -n "生成恢复计划|恢复计划预览|恢复计划哈希|restore_trash_item_plan|planHash" App.tsx`:
+  10 hits confirming correct wiring (invoke call, button label, preview title,
+  planHash display, type definition, state declarations, error notice).
+- `git diff --stat`: 2 files changed, 197 insertions.
+- `git status --short`: 2 modified files (App.tsx, styles.css).
+
+### Boundary Confirmation
+
+- `restore_trash_item_plan` is called only from "生成恢复计划" button.
+- No `apply_restore_trash_item` call was made.
+- No "确认恢复" button exists.
+- No "永久删除" button exists.
+- No `list_trash_items` UI exists.
+- No Trash page, route, drawer, or modal was added.
+- No Rust/Tauri files were modified.
+- No package dependencies were added.
+
+### Risks
+
+- Low. This is a read-only preview; no mutation is applied.
+- The `restore_trash_item_plan` Tauri invoke passes `trashPath` as the argument
+  name. Tauri v2 automatically converts snake_case Rust parameter names to
+  camelCase for the frontend invoke API. If this assumption is wrong, the invoke
+  will fail and the error will be caught and displayed.
+- The `RestoreTrashItemPlan` type is a minimal subset of the backend
+  `LifecyclePlan`. Fields not needed for preview (willCreateFiles, willBackup,
+  backupPath, includedFiles, skippedItems) are omitted. If a future slice needs
+  them, they can be added to the frontend type.
+
+### Next Step
+
+Wire `apply_restore_trash_item` with a confirm button in follow-up task.
+
 ## 2026-06-03 - Delete Agent Confirm Apply (017c)
 
 ### Task Goal
