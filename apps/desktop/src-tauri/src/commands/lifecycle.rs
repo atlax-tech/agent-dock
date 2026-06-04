@@ -56,13 +56,20 @@ pub struct ApplyLifecycleRequest {
     pub plan_hash: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyLifecyclePlanRequest {
+    pub plan: LifecyclePlan,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LifecyclePlan {
     pub plan_hash: String,
     pub operation: String,
     pub runtime: AgentRuntime,
     pub target_path: PathBuf,
+    pub source_path: Option<PathBuf>,
     pub will_create_files: Vec<String>,
     pub will_backup: bool,
     pub backup_path: Option<PathBuf>,
@@ -178,9 +185,7 @@ pub fn create_agent_plan(request: CreateAgentRequest) -> Result<LifecyclePlan, S
     let target_path = match request.target_root {
         Some(ref root) => expand_tilde(root),
         None => home
-            .join(".agentdock")
-            .join("dev-sandbox")
-            .join("openclaw")
+            .join(".openclaw")
             .join("agents")
             .join(&request.name),
     };
@@ -190,6 +195,7 @@ pub fn create_agent_plan(request: CreateAgentRequest) -> Result<LifecyclePlan, S
             operation: "create_agent".to_string(),
             runtime: AgentRuntime::OpenClaw,
             target_path: target_path.clone(),
+            source_path: None,
             will_create_files: Vec::new(),
             will_backup: false,
             backup_path: None,
@@ -212,6 +218,7 @@ pub fn create_agent_plan(request: CreateAgentRequest) -> Result<LifecyclePlan, S
         operation: "create_agent".to_string(),
         runtime: AgentRuntime::OpenClaw,
         target_path: target_path.clone(),
+        source_path: None,
         will_create_files,
         will_backup: false,
         backup_path: None,
@@ -229,28 +236,28 @@ pub fn create_agent_plan(request: CreateAgentRequest) -> Result<LifecyclePlan, S
 }
 
 #[tauri::command]
-pub fn apply_create_agent(request: ApplyLifecycleRequest) -> Result<LifecycleResult, String> {
-    let _home = dirs::home_dir().ok_or_else(|| "Could not resolve home directory.".to_string())?;
+pub fn apply_create_agent(request: ApplyLifecyclePlanRequest) -> Result<LifecycleResult, String> {
     let connection = open_database().map_err(|error| error.to_string())?;
-    let agents = load_agent_records(&connection).map_err(|error| error.to_string())?;
-    let agent = find_agent_by_operation(&agents, "create_agent")?;
-    let plan = create_agent_plan(CreateAgentRequest {
-        name: agent.name.clone(),
-        target_root: Some(agent.root_path.display().to_string()),
-    })?;
-    if plan.plan_hash != request.plan_hash {
-        return Err("Stale plan: re-generate the lifecycle plan before applying.".to_string());
-    }
+    let plan = request.plan;
+    validate_lifecycle_plan_for_apply(&plan, "create_agent", AgentRuntime::OpenClaw)?;
     if plan.blocked_reason.is_some() {
         return Err(format!(
             "Plan is blocked: {}",
             plan.blocked_reason.unwrap()
         ));
     }
+    if plan.target_path.exists() {
+        return Err("Create target already exists. Re-generate the lifecycle plan.".to_string());
+    }
+    let agent_name = plan
+        .target_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Create target has no valid agent name.".to_string())?;
     fs::create_dir_all(&plan.target_path).map_err(|error| error.to_string())?;
     let config_content = format!(
         "{{\n  \"name\": \"{}\"\n}}\n",
-        agent.name
+        agent_name
     );
     atomic_write(
         &plan.target_path.join("config.json"),
@@ -277,9 +284,7 @@ pub fn create_profile_plan(request: CreateProfileRequest) -> Result<LifecyclePla
     let target_path = match request.target_root {
         Some(ref root) => expand_tilde(root),
         None => home
-            .join(".agentdock")
-            .join("dev-sandbox")
-            .join("hermes")
+            .join(".hermes")
             .join("profiles")
             .join(&request.name),
     };
@@ -289,6 +294,7 @@ pub fn create_profile_plan(request: CreateProfileRequest) -> Result<LifecyclePla
             operation: "create_profile".to_string(),
             runtime: AgentRuntime::Hermes,
             target_path: target_path.clone(),
+            source_path: None,
             will_create_files: Vec::new(),
             will_backup: false,
             backup_path: None,
@@ -311,6 +317,7 @@ pub fn create_profile_plan(request: CreateProfileRequest) -> Result<LifecyclePla
         operation: "create_profile".to_string(),
         runtime: AgentRuntime::Hermes,
         target_path: target_path.clone(),
+        source_path: None,
         will_create_files,
         will_backup: false,
         backup_path: None,
@@ -328,26 +335,26 @@ pub fn create_profile_plan(request: CreateProfileRequest) -> Result<LifecyclePla
 }
 
 #[tauri::command]
-pub fn apply_create_profile(request: ApplyLifecycleRequest) -> Result<LifecycleResult, String> {
-    let _home = dirs::home_dir().ok_or_else(|| "Could not resolve home directory.".to_string())?;
+pub fn apply_create_profile(request: ApplyLifecyclePlanRequest) -> Result<LifecycleResult, String> {
     let connection = open_database().map_err(|error| error.to_string())?;
-    let agents = load_agent_records(&connection).map_err(|error| error.to_string())?;
-    let agent = find_agent_by_operation(&agents, "create_profile")?;
-    let plan = create_profile_plan(CreateProfileRequest {
-        name: agent.name.clone(),
-        target_root: Some(agent.root_path.display().to_string()),
-    })?;
-    if plan.plan_hash != request.plan_hash {
-        return Err("Stale plan: re-generate the lifecycle plan before applying.".to_string());
-    }
+    let plan = request.plan;
+    validate_lifecycle_plan_for_apply(&plan, "create_profile", AgentRuntime::Hermes)?;
     if plan.blocked_reason.is_some() {
         return Err(format!(
             "Plan is blocked: {}",
             plan.blocked_reason.unwrap()
         ));
     }
+    if plan.target_path.exists() {
+        return Err("Create target already exists. Re-generate the lifecycle plan.".to_string());
+    }
+    let profile_name = plan
+        .target_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Create target has no valid profile name.".to_string())?;
     fs::create_dir_all(&plan.target_path).map_err(|error| error.to_string())?;
-    let config_content = format!("name: \"{}\"\n", agent.name);
+    let config_content = format!("name: \"{}\"\n", profile_name);
     atomic_write(
         &plan.target_path.join("config.yaml"),
         config_content.as_bytes(),
@@ -378,6 +385,7 @@ pub fn duplicate_agent_plan(request: DuplicateRequest) -> Result<LifecyclePlan, 
             operation: "duplicate".to_string(),
             runtime: source.runtime,
             target_path: PathBuf::new(),
+            source_path: None,
             will_create_files: Vec::new(),
             will_backup: false,
             backup_path: None,
@@ -390,25 +398,21 @@ pub fn duplicate_agent_plan(request: DuplicateRequest) -> Result<LifecyclePlan, 
         });
     }
     let target_path = match source.runtime {
-        AgentRuntime::OpenClaw => home
-            .join(".agentdock")
-            .join("dev-sandbox")
-            .join("openclaw")
-            .join("agents")
-            .join(&request.new_name),
-        AgentRuntime::Hermes => home
-            .join(".agentdock")
-            .join("dev-sandbox")
-            .join("hermes")
-            .join("profiles")
-            .join(&request.new_name),
+        AgentRuntime::OpenClaw | AgentRuntime::Hermes => source
+            .root_path
+            .parent()
+            .map(|parent| parent.join(&request.new_name))
+            .unwrap_or_else(|| home.join(&request.new_name)),
     };
     let mut included_files = Vec::new();
     let mut skipped_items = Vec::new();
     collect_duplicate_items(&source.root_path, &source.root_path, &mut included_files, &mut skipped_items);
-    let will_backup = target_path.exists();
-    let backup_path = if will_backup {
-        Some(trash_base_dir(&home).join("duplicate-backups").join(format!(
+    let mut blocked_reason = None;
+    if target_path.exists() {
+        blocked_reason = Some(format!("Target path already exists: {}", target_path.display()));
+    }
+    let backup_path = if blocked_reason.is_none() {
+        Some(home.join(".agentdock").join("backups").join("duplicate-agent").join(format!(
             "{}-{}",
             request.new_name,
             now_millis()
@@ -421,14 +425,15 @@ pub fn duplicate_agent_plan(request: DuplicateRequest) -> Result<LifecyclePlan, 
         operation: "duplicate".to_string(),
         runtime: source.runtime,
         target_path,
+        source_path: Some(source.root_path.clone()),
         will_create_files: included_files.clone(),
-        will_backup,
+        will_backup: false,
         backup_path,
         warnings: vec![
             format!("Will duplicate '{}' as '{}'.", source.name, request.new_name),
             format!("Source: {}", source.root_path.display()),
         ],
-        blocked_reason: None,
+        blocked_reason,
         included_files,
         skipped_items,
     };
@@ -437,52 +442,55 @@ pub fn duplicate_agent_plan(request: DuplicateRequest) -> Result<LifecyclePlan, 
 }
 
 #[tauri::command]
-pub fn apply_duplicate_agent(request: ApplyLifecycleRequest) -> Result<LifecycleResult, String> {
-    let _home = dirs::home_dir().ok_or_else(|| "Could not resolve home directory.".to_string())?;
+pub fn apply_duplicate_agent(request: ApplyLifecyclePlanRequest) -> Result<LifecycleResult, String> {
     let connection = open_database().map_err(|error| error.to_string())?;
-    let agents = load_agent_records(&connection).map_err(|error| error.to_string())?;
-    let source = agents
-        .iter()
-        .find(|a| is_runtime_root_or_container(&a.root_path) == false)
-        .ok_or_else(|| "No valid source agent found for duplicate.".to_string())?;
-    let plan = duplicate_agent_plan(DuplicateRequest {
-        source_agent_id: source.id.clone(),
-        new_name: source.name.clone(),
-    })?;
-    if plan.plan_hash != request.plan_hash {
-        return Err("Stale plan: re-generate the lifecycle plan before applying.".to_string());
-    }
+    let plan = request.plan;
+    validate_lifecycle_plan_for_apply(&plan, "duplicate", plan.runtime)?;
     if plan.blocked_reason.is_some() {
         return Err(format!("Plan is blocked: {}", plan.blocked_reason.unwrap()));
     }
-    if plan.will_backup {
-        if let Some(ref backup_path) = plan.backup_path {
-            if source.root_path.exists() {
-                copy_dir_recursive(&source.root_path, backup_path)
-                    .map_err(|error| error.to_string())?;
-            }
-        }
+    if plan.target_path.exists() {
+        return Err("Duplicate target already exists. Re-generate the lifecycle plan.".to_string());
     }
-    fs::create_dir_all(&plan.target_path).map_err(|error| error.to_string())?;
+    let source_path = plan
+        .source_path
+        .clone()
+        .ok_or_else(|| "Duplicate plan is missing source path.".to_string())?;
+    if !source_path.is_dir() {
+        return Err("Duplicate source path no longer exists.".to_string());
+    }
+    if is_runtime_root_or_container(&source_path) {
+        return Err("Cannot duplicate a runtime root/global/container directory.".to_string());
+    }
+    let staging_path = plan
+        .target_path
+        .parent()
+        .ok_or_else(|| "Duplicate target has no parent directory.".to_string())?
+        .join(format!(".agentdock.duplicate.tmp.{}.{}", std::process::id(), now_millis()));
+    fs::create_dir_all(&staging_path).map_err(|error| error.to_string())?;
     for relative in &plan.included_files {
-        let src = source.root_path.join(relative);
-        let dst = plan.target_path.join(relative);
+        let src = source_path.join(relative.trim_end_matches('/'));
+        let dst = staging_path.join(relative.trim_end_matches('/'));
         if src.is_file() {
             if let Some(parent) = dst.parent() {
                 fs::create_dir_all(parent).map_err(|error| error.to_string())?;
             }
             fs::copy(&src, &dst).map_err(|error| error.to_string())?;
         } else if src.is_dir() {
-            copy_dir_recursive(&src, &dst).map_err(|error| error.to_string())?;
+            fs::create_dir_all(&dst).map_err(|error| error.to_string())?;
         }
     }
-    patch_config_name(&plan.target_path, source.runtime);
-    let scan_result = crate::scanner::scan_selected_root(source.runtime, plan.target_path.clone())
+    fs::rename(&staging_path, &plan.target_path).map_err(|error| {
+        let _ = fs::remove_dir_all(&staging_path);
+        error.to_string()
+    })?;
+    patch_config_name(&plan.target_path, plan.runtime);
+    let scan_result = crate::scanner::scan_selected_root(plan.runtime, plan.target_path.clone())
         .map_err(|error| error.to_string())?;
     upsert_agent_records(&connection, &scan_result).map_err(|error| error.to_string())?;
     Ok(LifecycleResult {
         operation: "duplicate".to_string(),
-        runtime: source.runtime,
+        runtime: plan.runtime,
         target_path: plan.target_path,
         backup_path: plan.backup_path,
         scan_result,
@@ -500,6 +508,7 @@ pub fn delete_agent_plan(request: DeleteRequest) -> Result<LifecyclePlan, String
             operation: "delete".to_string(),
             runtime: agent.runtime,
             target_path: agent.root_path.clone(),
+            source_path: Some(agent.root_path.clone()),
             will_create_files: Vec::new(),
             will_backup: false,
             backup_path: None,
@@ -521,6 +530,7 @@ pub fn delete_agent_plan(request: DeleteRequest) -> Result<LifecyclePlan, String
         operation: "delete".to_string(),
         runtime: agent.runtime,
         target_path: agent.root_path.clone(),
+        source_path: Some(agent.root_path.clone()),
         will_create_files: Vec::new(),
         will_backup: true,
         backup_path: Some(trash_dir.clone()),
@@ -712,6 +722,7 @@ pub fn restore_trash_item_plan(trash_path: String) -> Result<LifecyclePlan, Stri
             operation: "restore".to_string(),
             runtime: parse_runtime(&manifest.runtime),
             target_path: original_path.clone(),
+            source_path: Some(trash.clone()),
             will_create_files: Vec::new(),
             will_backup: false,
             backup_path: None,
@@ -730,6 +741,7 @@ pub fn restore_trash_item_plan(trash_path: String) -> Result<LifecyclePlan, Stri
         operation: "restore".to_string(),
         runtime,
         target_path: original_path.clone(),
+        source_path: Some(trash.clone()),
         will_create_files: Vec::new(),
         will_backup: false,
         backup_path: None,
@@ -837,11 +849,31 @@ fn validate_agent_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_lifecycle_plan_for_apply(
+    plan: &LifecyclePlan,
+    expected_operation: &str,
+    expected_runtime: AgentRuntime,
+) -> Result<(), String> {
+    if plan.operation != expected_operation {
+        return Err("Unsupported lifecycle operation.".to_string());
+    }
+    if plan.runtime != expected_runtime {
+        return Err("Lifecycle plan runtime does not match apply command.".to_string());
+    }
+    if compute_plan_hash(plan) != plan.plan_hash {
+        return Err("Stale plan: re-generate the lifecycle plan before applying.".to_string());
+    }
+    Ok(())
+}
+
 fn compute_plan_hash(plan: &LifecyclePlan) -> String {
     let mut hasher = Sha256::new();
     hasher.update(plan.operation.as_bytes());
     hasher.update(plan.runtime.as_str().as_bytes());
     hasher.update(plan.target_path.to_string_lossy().as_bytes());
+    if let Some(source_path) = &plan.source_path {
+        hasher.update(source_path.to_string_lossy().as_bytes());
+    }
     for file in &plan.will_create_files {
         hasher.update(file.as_bytes());
     }
@@ -1118,17 +1150,6 @@ fn find_agent_in_db(
         .into_iter()
         .find(|agent| agent.id == agent_id)
         .ok_or_else(|| "Agent is not indexed. Re-scan the runtime root first.".to_string())
-}
-
-fn find_agent_by_operation(
-    agents: &[AgentScanRecord],
-    operation: &str,
-) -> Result<AgentScanRecord, String> {
-    agents
-        .iter()
-        .find(|a| !is_runtime_root_or_container(&a.root_path))
-        .cloned()
-        .ok_or_else(|| format!("No valid agent found for {} operation.", operation))
 }
 
 fn collect_duplicate_items(
@@ -1464,6 +1485,7 @@ mod tests {
             operation: "create_agent".to_string(),
             runtime: AgentRuntime::OpenClaw,
             target_path: home.path().join("test"),
+            source_path: None,
             will_create_files: vec!["config.json".to_string()],
             will_backup: false,
             backup_path: None,
@@ -1474,6 +1496,66 @@ mod tests {
         };
         let plan2 = plan1.clone();
         assert_eq!(compute_plan_hash(&plan1), compute_plan_hash(&plan2));
+    }
+
+    #[test]
+    fn apply_create_agent_uses_exact_preview_plan() {
+        let home = tempdir().expect("home");
+        let target = home.path().join("agents").join("new-agent");
+        let mut plan = create_agent_plan(CreateAgentRequest {
+            name: "new-agent".to_string(),
+            target_root: Some(target.display().to_string()),
+        })
+        .expect("plan");
+        plan.plan_hash = compute_plan_hash(&plan);
+
+        let result = apply_create_agent(ApplyLifecyclePlanRequest { plan }).expect("apply");
+
+        assert_eq!(result.operation, "create_agent");
+        assert!(target.join("config.json").is_file());
+        assert!(target.join("SOUL.md").is_file());
+        assert!(target.join("skills").is_dir());
+    }
+
+    #[test]
+    fn apply_duplicate_agent_uses_plan_source_and_skips_private_items() {
+        let home = tempdir().expect("home");
+        let source = home.path().join("agents").join("source-agent");
+        let target = home.path().join("agents").join("copy-agent");
+        fs::create_dir_all(source.join("skills")).expect("skills");
+        fs::create_dir_all(source.join("sessions")).expect("sessions");
+        fs::write(source.join("config.json"), r#"{"name":"source-agent"}"#).expect("config");
+        fs::write(source.join("SOUL.md"), "soul").expect("soul");
+        fs::write(source.join(".env"), "SECRET=1").expect("env");
+        fs::write(source.join("sessions/private.json"), "private").expect("session");
+
+        let mut included = Vec::new();
+        let mut skipped = Vec::new();
+        collect_duplicate_items(&source, &source, &mut included, &mut skipped);
+        let mut plan = LifecyclePlan {
+            plan_hash: String::new(),
+            operation: "duplicate".to_string(),
+            runtime: AgentRuntime::OpenClaw,
+            target_path: target.clone(),
+            source_path: Some(source.clone()),
+            will_create_files: included.clone(),
+            will_backup: false,
+            backup_path: Some(home.path().join(".agentdock/backups/duplicate-agent/copy-agent")),
+            warnings: Vec::new(),
+            blocked_reason: None,
+            included_files: included,
+            skipped_items: skipped,
+        };
+        plan.plan_hash = compute_plan_hash(&plan);
+
+        let result = apply_duplicate_agent(ApplyLifecyclePlanRequest { plan }).expect("apply");
+
+        assert_eq!(result.operation, "duplicate");
+        assert!(target.join("config.json").is_file());
+        assert!(target.join("SOUL.md").is_file());
+        assert!(target.join("skills").is_dir());
+        assert!(!target.join(".env").exists());
+        assert!(!target.join("sessions").exists());
     }
 
     #[test]

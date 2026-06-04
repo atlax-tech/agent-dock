@@ -37,6 +37,7 @@ pub fn run() {
             commands::providers::scan_lmstudio_runtime,
             commands::providers::scan_comfy_runtime,
             commands::runtime_detection::detect_runtime_install_statuses,
+            commands::runtime_detection::get_runtime_version_detail,
             commands::runtime_detection::update_runtime_product,
             commands::lifecycle::create_agent_plan,
             commands::lifecycle::apply_create_agent,

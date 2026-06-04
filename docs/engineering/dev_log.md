@@ -1,5 +1,318 @@
 # AgentDock Development Log
 
+## 2026-06-04 - Version Popover Simple Lines
+
+### Task Goal
+
+Simplify the runtime version popover to display sanitized version output as
+plain one-line rows with no custom column layout.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Removed label/value parsing from the version popover.
+- Rendered each sanitized version output line as one compact row.
+- Reduced the popover width and spacing.
+- Kept project path filtering unchanged.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `git diff --check`: passed.
+- `rg -n "Project:|projectPath|project_path" apps/desktop/src/app/App.tsx apps/desktop/src-tauri/src/commands/runtime_detection.rs || true`:
+  no hits.
+
+### Risks
+
+- Low. Presentation-only change.
+
+### Next Step
+
+No further action unless visual verification shows the compact width still needs
+minor adjustment.
+
+## 2026-06-04 - Version Popover Layout Fix
+
+### Task Goal
+
+Fix the runtime version popover visual layout so version details render as a
+compact small popover with horizontal rows instead of narrow vertical character
+wrapping.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Split version detail lines into headline rows and label/value rows.
+- Rendered colon-separated details such as Python/OpenAI SDK/update status in a
+  horizontal two-column layout.
+- Gave the popover a stable compact width and removed character-by-character
+  wrapping.
+- Kept project path redaction boundary unchanged.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `git diff --check`: passed.
+- `rg -n "Project:|projectPath|project_path" apps/desktop/src/app/App.tsx apps/desktop/src-tauri/src/commands/runtime_detection.rs || true`:
+  no hits.
+
+### Risks
+
+- Low. Presentation-only frontend change.
+
+### Next Step
+
+Visually verify in the running desktop app after opening the version popover.
+
+## 2026-06-04 - Runtime Version Popover
+
+### Task Goal
+
+Make the runtime version under the selected product clickable and show a small
+in-place popover with detailed version information from the runtime version
+query, without exposing the runtime project path.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `apps/desktop/src-tauri/src/commands/runtime_detection.rs`
+- `apps/desktop/src-tauri/src/lib.rs`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added read-only Tauri command `get_runtime_version_detail`.
+- The command runs the selected runtime CLI with `--version` and returns
+  sanitized detail lines.
+- Version detail sanitization removes location lines before data reaches the UI.
+- Registered the command in the Tauri invoke handler.
+- Turned the Dashboard runtime version value into a clickable link-style button.
+- Added an in-place popover for loading, error, fixture fallback, warnings, and
+  detailed version lines.
+- Added a Rust unit test covering runtime-location line filtering.
+
+### Boundary Confirmation
+
+- No project path is rendered by the frontend popover.
+- No update, install, write, migration, session, memory, or secret flow was added.
+- Backend change is read-only and limited to `openclaw --version` /
+  `hermes --version`.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed
+  (69 tests).
+- `git diff --check`: passed.
+- `rg -n "Project:|projectPath|project_path" apps/desktop/src/app/App.tsx apps/desktop/src-tauri/src/commands/runtime_detection.rs || true`:
+  clean after test-name cleanup.
+
+### Risks
+
+- Low. The command depends on the runtime CLI being present in `PATH`; missing
+  CLI is shown as a popover error.
+
+### Next Step
+
+Use the same sanitized-detail pattern if future runtime diagnostics need to
+display CLI output.
+
+## 2026-06-04 - Phase 2 Final Lifecycle Closeout
+
+### Task Goal
+
+Close the remaining Phase 2 lifecycle loop for create/copy/delete/restore
+without adding new plans, new sub-phases, Trash navigation, Phase 3+ areas, or
+real operations against `~/.openclaw` / `~/.hermes`.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `apps/desktop/src-tauri/src/commands/lifecycle.rs`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added create Agent/Profile plan preview and explicit confirm apply from the
+  Agent/Profile tree footer.
+- Added copy Agent/Profile plan preview and explicit confirm apply from Basic
+  Settings.
+- Updated create/copy backend apply contracts so they receive the exact
+  previewed `LifecyclePlan`, recompute its hash, validate operation/runtime, and
+  reject stale or blocked plans.
+- Create targets resolve under the runtime home (`<home>/agents/<name>` for
+  OpenClaw, `<home>/profiles/<name>` for Hermes) instead of a fake AgentDock
+  sandbox path.
+- Copy targets resolve next to the source agent/profile directory.
+- Copy apply uses a staging directory and atomic rename to the target path.
+- Copy skips private/session/memory/log/cache directories and secret-bearing
+  files such as `.env`, `auth.json`, and token/credential files.
+- Added Rust tests for exact create-plan apply and duplicate-plan apply with
+  private item skipping.
+- Added restore confirmation inside the existing restore plan preview only.
+- The restore confirm action invokes `apply_restore_trash_item` with
+  `{ planHash: restorePlan.planHash }`.
+- Restore apply success shows "恢复完成" and refreshes both managed-agent scan and
+  runtime detection state.
+- Restore apply failure preserves the restore preview and displays the backend
+  error inline.
+- Restore confirm is hidden when `restorePlan.blockedReason` exists.
+- Existing delete flow remains plan preview -> confirm apply -> backup -> trash
+  -> rescan -> report.
+
+### Phase Status
+
+- Restore confirmation application: implemented for the existing delete-success
+  restore preview flow.
+- Create Agent/Profile: implemented.
+- Copy Agent/Profile: implemented.
+- Phase 2 create/copy/delete/restore lifecycle is now closed for the requested
+  scope.
+
+### Backend Contract Notes
+
+- `apply_create_agent`, `apply_create_profile`, and `apply_duplicate_agent` now
+  accept `{ plan }`, not just `{ planHash }`.
+- The previous hash-only apply path was removed for create/copy because it could
+  not prove the confirmed preview was the object being applied.
+- `apply_restore_trash_item` still uses the existing backend contract
+  `{ planHash }`, matching the task requirement.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `git diff --check`: passed.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed
+  (71 tests).
+- `rg -n "永久删除|list_trash_items" apps/desktop/src/app/App.tsx || true`:
+  no output.
+- `rg -n "disabled placeholder|尚未接入确认应用|创建流程尚未接入|复制 Agent/Profile 尚未接入" apps/desktop/src/app/App.tsx || true`:
+  one hit for the unrelated install placeholder only.
+- Final `git diff --stat` / `git status --short` are captured in the final
+  report.
+
+### Boundary Confirmation
+
+- No PRD, SPEC, or UI/UX product document was modified.
+- No new plan document or subtask document was created.
+- No Trash page, Settings Trash list, permanent delete action, or
+  `list_trash_items` frontend UI was added.
+- No Provider, Personality, Sessions, Memory, Skills, Permissions, Channel, or
+  Scheduled Tasks implementation was added.
+- No session or memory full content is read.
+- No secret migration was added.
+- Backend modifications were limited to `lifecycle.rs` for create/copy apply
+  contract safety and tests.
+
+### Risks
+
+- Restore apply depends on the existing backend plan-hash lookup across
+  AgentDock Trash. If a trash item disappears between preview and confirm, the
+  backend returns an error and the preview remains visible.
+- Create/copy are file-based lifecycle operations; no CLI-specific OpenClaw or
+  Hermes bootstrap command is invoked in this phase.
+
+### Next Step
+
+Proceed to Phase 3 only when explicitly requested.
+
+## 2026-06-04 - Phase 1 + Phase 2 Audit and Closeout
+
+### Task Goal
+
+Audit the current desktop shell against the requested Phase 1 and Phase 2
+acceptance scope, close small frontend gaps only, and avoid Phase 3+ expansion.
+
+### Files Changed
+
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Phase 1 not-installed panel now shows the official recommended install command
+  preview for OpenClaw/Hermes.
+- Added explicit safety notes that install is a disabled placeholder, no command
+  is executed, install must show command/options/backup/rescan preview first,
+  and AgentDock does not upload local config, sessions, memories, or secrets.
+- Moved the add Agent/Profile entry to the bottom of the tree and labeled it as
+  a disabled placeholder because create/apply UI is not complete in this slice.
+- Added a disabled copy entry in Basic Settings, clearly marked as not connected
+  to confirm/apply yet.
+- Basic Settings now explicitly displays workspace/profile path and config file
+  path in addition to runtime type, agent/profile id, gateway, env path, delete,
+  restore preview, and metadata fields.
+- Kept existing delete behavior: plan preview, confirm apply, backup, trash,
+  rescan, and visible backup/trash paths.
+- Kept restore behavior preview-only: restore plan hash and target are visible,
+  with no confirm/apply restore UI.
+
+### Phase Status
+
+- Phase 1: complete for the requested acceptance scope.
+- Phase 2: complete for the requested acceptance scope, with create/copy and
+  global environment editing intentionally disabled placeholders.
+
+### Placeholder / Blocker Status
+
+- Placeholder: install execution remains disabled and does not run shell/network
+  commands.
+- Placeholder: global environment variable editing entry exists but is disabled.
+- Placeholder: create Agent/Profile and copy Agent/Profile entries exist but are
+  disabled until a full plan/confirm/apply UI is wired.
+- Placeholder: restore confirm/apply is not implemented; restore is explicitly
+  preview-only and must not be described as restored.
+- No remaining Phase 1/2 blocker found in this audit.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `git diff --check`: passed.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed
+  (68 tests).
+- `rg -n "apply_restore_trash_item|确认恢复|永久删除|list_trash_items" apps/desktop/src/app/App.tsx || true`:
+  no hits.
+
+### Boundary Confirmation
+
+- No Phase 3+ feature was implemented.
+- No production backend files were modified.
+- No `apply_restore_trash_item`, `list_trash_items`, restore-confirm, permanent
+  delete, or Trash first-level navigation was added to the frontend.
+- No session or memory full content is read by the UI.
+- No secret migration was added.
+
+### Risks
+
+- Low. Changes are frontend-only additive rendering/labels.
+- The real create/copy/install/global-env flows still require future
+  plan-preview + confirm-apply work before enabling.
+
+### Next Step
+
+Proceed only when the next task explicitly targets a remaining placeholder.
+
 ## 2026-06-04 - Restore Plan Preview from Delete Success (018b)
 
 ### Task Goal

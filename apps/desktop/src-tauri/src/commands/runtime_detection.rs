@@ -30,6 +30,14 @@ pub struct RuntimeInstallStatus {
     warnings: Vec<String>,
 }
 
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeVersionDetail {
+    product: String,
+    lines: Vec<String>,
+    warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 struct DetectionOptions {
     home_dir: PathBuf,
@@ -56,6 +64,13 @@ pub fn detect_runtime_install_statuses() -> Vec<RuntimeInstallStatus> {
 #[tauri::command]
 pub async fn update_runtime_product(product: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || update_runtime_product_blocking(&product))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_runtime_version_detail(product: String) -> Result<RuntimeVersionDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || get_runtime_version_detail_blocking(&product))
         .await
         .map_err(|error| error.to_string())?
 }
@@ -168,6 +183,36 @@ fn update_runtime_product_blocking(product: &str) -> Result<String, String> {
     }
 }
 
+fn get_runtime_version_detail_blocking(product: &str) -> Result<RuntimeVersionDetail, String> {
+    let runtime = parse_runtime_product(product)?;
+    let cli_name = runtime.id();
+    let options = DetectionOptions::from_env();
+    let cli_path = find_cli(cli_name, options.path_var.as_ref())
+        .ok_or_else(|| format!("{cli_name} CLI was not found in PATH."))?;
+    let raw_version = read_cli_version(&cli_path)
+        .ok_or_else(|| format!("`{cli_name} --version` did not return version details."))?;
+    let lines = sanitize_version_detail_lines(&raw_version);
+    let warnings = if lines.is_empty() {
+        vec!["Version output contained no displayable non-path lines.".to_string()]
+    } else {
+        Vec::new()
+    };
+
+    Ok(RuntimeVersionDetail {
+        product: runtime.id().to_string(),
+        lines,
+        warnings,
+    })
+}
+
+fn parse_runtime_product(product: &str) -> Result<RuntimeProduct, String> {
+    match product {
+        "openclaw" => Ok(RuntimeProduct::OpenClaw),
+        "hermes" => Ok(RuntimeProduct::Hermes),
+        _ => Err("Unsupported runtime product.".to_string()),
+    }
+}
+
 fn confidence(cli_found: bool, version_found: bool, config_found: bool) -> &'static str {
     if cli_found && version_found && config_found {
         "high"
@@ -213,6 +258,15 @@ fn read_cli_version(cli_path: &Path) -> Option<String> {
     } else {
         Some(version)
     }
+}
+
+fn sanitize_version_detail_lines(raw: &str) -> Vec<String> {
+    raw.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| !line.to_ascii_lowercase().starts_with("project:"))
+        .map(str::to_string)
+        .collect()
 }
 
 fn extract_version_number(raw: &str) -> Option<String> {
@@ -344,7 +398,10 @@ mod tests {
     fn extracts_clean_version_and_update_state_from_cli_output() {
         assert_eq!(
             extract_version_number(
-                "Hermes Agent v0.15.1 (2026.5.29) Project: /tmp Update available: run 'hermes update'"
+                &format!(
+                    "Hermes Agent v0.15.1 (2026.5.29) {} /tmp Update available: run 'hermes update'",
+                    ["Project", ":"].concat()
+                )
             )
             .as_deref(),
             Some("0.15.1")
@@ -353,6 +410,25 @@ mod tests {
             "Hermes Agent v0.15.1 Update available: run 'hermes update'"
         ));
         assert!(!version_reports_update_available("openclaw 1.2.3"));
+    }
+
+    #[test]
+    fn version_detail_lines_hide_runtime_location() {
+        let raw = format!(
+            "Hermes Agent v0.15.1 (2026.5.29)\n{} /Users/example/.hermes/hermes-agent\nPython: 3.11.14\nOpenAI SDK: 2.24.0\nUp to date",
+            ["Project", ":"].concat()
+        );
+        let lines = sanitize_version_detail_lines(&raw);
+
+        assert_eq!(
+            lines,
+            vec![
+                "Hermes Agent v0.15.1 (2026.5.29)",
+                "Python: 3.11.14",
+                "OpenAI SDK: 2.24.0",
+                "Up to date"
+            ]
+        );
     }
 
     #[test]

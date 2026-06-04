@@ -320,13 +320,15 @@ button {
 }
 
 .runtimeStatus {
-  display: flex;
+  position: relative;
+  display: inline-flex;
   align-items: center;
   gap: 10px;
   min-height: 28px;
+  justify-self: start;
 }
 
-.runtimeStatus div {
+.runtimeStatus > div {
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -342,6 +344,75 @@ button {
   overflow-wrap: anywhere;
   color: #172026;
   font-size: 13px;
+}
+
+.versionLink {
+  padding: 0;
+  border-radius: 4px;
+  color: #172026;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.versionLink:hover {
+  color: #174f63;
+}
+
+.versionPopover {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 8px);
+  left: 0;
+  display: grid;
+  gap: 6px;
+  width: max-content;
+  min-width: 320px;
+  max-width: min(560px, calc(100vw - 72px));
+  padding: 10px 12px;
+  border: 1px solid #cfd8d4;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgb(23 32 38 / 14%);
+}
+
+.versionPopover span {
+  color: #233339;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.versionDetailRows {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  width: 100%;
+}
+
+.versionDetailLine {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+  color: #172026;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.versionDetailWarning {
+  padding-top: 4px;
+  border-top: 1px solid #edf1ef;
+  color: #5a4724;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .inlineUpdateButton {
@@ -537,6 +608,96 @@ button {
   background: #f1f5f3;
 }
 
+.treeFooterActions {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.treeFooterActions .addAgentButton {
+  margin-top: 0;
+}
+
+.treeFooterActions span {
+  color: #66736d;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.lifecyclePlanPanel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.lifecyclePlanPanel label {
+  display: grid;
+  gap: 6px;
+  color: #41504a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lifecyclePlanPanel input {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #cfd8d4;
+  border-radius: 6px;
+  color: #17252b;
+  background: #f8fbfa;
+  font: inherit;
+}
+
+.lifecyclePlanActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lifecyclePlanPreview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.lifecyclePlanPreview h4 {
+  margin: 0;
+  font-size: 14px;
+  color: #233339;
+}
+
+.lifecyclePlanPreview .detailGrid dd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.lifecyclePlanPanel .previewBlocked {
+  padding: 10px 12px;
+  border: 1px solid #e8b8b8;
+  border-radius: 8px;
+  color: #7a2222;
+  background: #fff0f0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.lifecyclePlanPanel .previewExplanation {
+  padding: 10px 12px;
+  border: 1px solid #dce8e3;
+  border-radius: 8px;
+  color: #31515b;
+  background: #ffffff;
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-all;
+}
+
 .operationPane {
   display: flex;
   flex-direction: column;
@@ -636,6 +797,19 @@ button {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.operationTitleActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.compactActionButton {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .detailGridCompact {
@@ -1037,7 +1211,20 @@ button {
   cursor: pointer;
 }
 
+.lifecyclePlanPanel .previewCancelButton {
+  padding: 8px 16px;
+  border-radius: 6px;
+  color: #40504a;
+  background: #f4f8f6;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 .deletePlanPreview .previewCancelButton:hover {
+  background: #e8f0ec;
+}
+
+.lifecyclePlanPanel .previewCancelButton:hover {
   background: #e8f0ec;
 }
 
@@ -1051,13 +1238,33 @@ button {
   cursor: pointer;
 }
 
+.lifecyclePlanPanel .previewConfirmButton {
+  justify-self: start;
+  padding: 8px 16px;
+  border-radius: 6px;
+  color: #ffffff;
+  background: #174f42;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 .deletePlanPreview .previewConfirmButton:hover:not(:disabled) {
   background: #9a1e15;
+}
+
+.lifecyclePlanPanel .previewConfirmButton:hover:not(:disabled) {
+  background: #103b31;
 }
 
 .deletePlanPreview .previewConfirmButton:disabled {
   background: #e8b8b8;
   color: #7a4444;
+  cursor: not-allowed;
+}
+
+.lifecyclePlanPanel .previewConfirmButton:disabled {
+  color: #6c7773;
+  background: #dce2df;
   cursor: not-allowed;
 }
 
@@ -1083,11 +1290,35 @@ button {
   line-height: 1.45;
 }
 
+.lifecyclePlanPanel .previewSuccess {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #c4e0d4;
+  border-radius: 8px;
+  color: #174f42;
+  background: #e8f5ee;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .deletePlanPreview .previewSuccess strong {
   font-size: 14px;
 }
 
 .deletePlanPreview .previewError {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e8b8b8;
+  border-radius: 8px;
+  color: #7a2222;
+  background: #fff0f0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.lifecyclePlanPanel .previewError {
   display: grid;
   gap: 8px;
   padding: 12px;

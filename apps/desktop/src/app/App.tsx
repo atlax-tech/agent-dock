@@ -40,6 +40,12 @@ type RuntimeInstallStatus = {
   warnings: string[];
 };
 
+type RuntimeVersionDetail = {
+  product: RuntimeProduct;
+  lines: string[];
+  warnings: string[];
+};
+
 type RuntimeWarning = {
   code: string;
   message: string;
@@ -120,6 +126,35 @@ type RestoreTrashItemPlan = {
   targetPath: string;
   warnings: string[];
   blockedReason?: string | null;
+};
+
+type RestoreTrashItemResult = {
+  operation: string;
+  runtime: RuntimeProduct;
+  targetPath: string;
+  backupPath?: string | null;
+};
+
+type LifecyclePlan = {
+  planHash: string;
+  operation: "create_agent" | "create_profile" | "duplicate" | string;
+  runtime: RuntimeProduct;
+  targetPath: string;
+  sourcePath?: string | null;
+  willCreateFiles: string[];
+  willBackup: boolean;
+  backupPath?: string | null;
+  warnings: string[];
+  blockedReason?: string | null;
+  includedFiles: string[];
+  skippedItems: string[];
+};
+
+type LifecycleResult = {
+  operation: string;
+  runtime: RuntimeProduct;
+  targetPath: string;
+  backupPath?: string | null;
 };
 
 type AgentScanSource = "desktop" | "fixture" | "empty";
@@ -277,6 +312,26 @@ export function App() {
     "idle" | "loading" | "error"
   >("idle");
   const [restorePlanError, setRestorePlanError] = useState("");
+  const [restoreApplyState, setRestoreApplyState] = useState<"idle" | "running" | "success" | "error">(
+    "idle",
+  );
+  const [restoreApplyResult, setRestoreApplyResult] = useState<RestoreTrashItemResult | null>(null);
+  const [restoreApplyError, setRestoreApplyError] = useState("");
+  const [createPanelOpen, setCreatePanelOpen] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createPlan, setCreatePlan] = useState<LifecyclePlan | null>(null);
+  const [createState, setCreateState] = useState<"idle" | "planning" | "applying" | "success" | "error">("idle");
+  const [createResult, setCreateResult] = useState<LifecycleResult | null>(null);
+  const [createError, setCreateError] = useState("");
+  const [copyPanelOpen, setCopyPanelOpen] = useState(false);
+  const [copyName, setCopyName] = useState("");
+  const [copyPlan, setCopyPlan] = useState<LifecyclePlan | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "planning" | "applying" | "success" | "error">("idle");
+  const [copyResult, setCopyResult] = useState<LifecycleResult | null>(null);
+  const [copyError, setCopyError] = useState("");
+  const [versionDetail, setVersionDetail] = useState<RuntimeVersionDetail | null>(null);
+  const [versionDetailState, setVersionDetailState] = useState<"idle" | "loading" | "error">("idle");
+  const [versionDetailError, setVersionDetailError] = useState("");
 
   const runtime = useMemo(
     () => ({
@@ -456,10 +511,50 @@ export function App() {
       });
   }
 
+  function toggleRuntimeVersionDetail(product: RuntimeProduct) {
+    if (versionDetailState === "loading") {
+      return;
+    }
+
+    if (versionDetail?.product === product) {
+      setVersionDetail(null);
+      setVersionDetailState("idle");
+      setVersionDetailError("");
+      return;
+    }
+
+    if (!hasTauriCommandBridge()) {
+      setVersionDetail({
+        product,
+        lines: getBrowserVersionDetailFallback(product),
+        warnings: ["Browser preview fallback; desktop app uses the runtime version command."],
+      });
+      setVersionDetailState("idle");
+      setVersionDetailError("");
+      return;
+    }
+
+    setVersionDetail(null);
+    setVersionDetailState("loading");
+    setVersionDetailError("");
+    invoke<RuntimeVersionDetail>("get_runtime_version_detail", { product })
+      .then((detail) => {
+        setVersionDetail(detail);
+        setVersionDetailState("idle");
+      })
+      .catch((error: unknown) => {
+        setVersionDetailState("error");
+        setVersionDetailError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
   function dismissRestorePlan() {
     setRestorePlan(null);
     setRestorePlanRequestState("idle");
     setRestorePlanError("");
+    setRestoreApplyState("idle");
+    setRestoreApplyResult(null);
+    setRestoreApplyError("");
   }
 
   function requestRestorePlan(trashTargetPath: string) {
@@ -471,6 +566,9 @@ export function App() {
 
     setRestorePlanRequestState("loading");
     setRestorePlanError("");
+    setRestoreApplyState("idle");
+    setRestoreApplyResult(null);
+    setRestoreApplyError("");
     invoke<RestoreTrashItemPlan>("restore_trash_item_plan", {
       trashPath: trashTargetPath,
     })
@@ -484,6 +582,30 @@ export function App() {
       });
   }
 
+  function applyRestoreTrashItem(plan: RestoreTrashItemPlan) {
+    if (!hasTauriCommandBridge()) {
+      setRestoreApplyState("error");
+      setRestoreApplyError("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setRestoreApplyState("running");
+    setRestoreApplyError("");
+    invoke<RestoreTrashItemResult>("apply_restore_trash_item", {
+      request: { planHash: plan.planHash },
+    })
+      .then((result) => {
+        setRestoreApplyState("success");
+        setRestoreApplyResult(result);
+        setRescanRequestId((current) => current + 1);
+        setRuntimeDetectionRequestId((current) => current + 1);
+      })
+      .catch((error: unknown) => {
+        setRestoreApplyState("error");
+        setRestoreApplyError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
   function dismissDeletePlan() {
     setDeleteAgentPlan(null);
     setDeleteAgentApplyState("idle");
@@ -492,6 +614,157 @@ export function App() {
     setRestorePlan(null);
     setRestorePlanRequestState("idle");
     setRestorePlanError("");
+    setRestoreApplyState("idle");
+    setRestoreApplyResult(null);
+    setRestoreApplyError("");
+  }
+
+  function openCreatePanel(runtimeProduct: RuntimeProduct) {
+    setCreatePanelOpen(true);
+    setCreateName(runtimeProduct === "openclaw" ? "new-agent" : "new-profile");
+    setCreatePlan(null);
+    setCreateState("idle");
+    setCreateResult(null);
+    setCreateError("");
+  }
+
+  function requestCreateLifecyclePlan(runtime: DashboardRuntime) {
+    const name = createName.trim();
+    if (!name) {
+      setCreateState("error");
+      setCreateError("请输入 Agent/Profile 名称。");
+      return;
+    }
+    if (!hasTauriCommandBridge()) {
+      setCreateState("error");
+      setCreateError("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setCreateState("planning");
+    setCreateError("");
+    setCreateResult(null);
+    const command = runtime.product === "openclaw" ? "create_agent_plan" : "create_profile_plan";
+    invoke<LifecyclePlan>(command, {
+      request: {
+        name,
+        targetRoot: createTargetRoot(runtime, name),
+      },
+    })
+      .then((plan) => {
+        setCreatePlan(plan);
+        setCreateState("idle");
+      })
+      .catch((error: unknown) => {
+        setCreateState("error");
+        setCreateError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function applyCreateLifecyclePlan(plan: LifecyclePlan) {
+    if (!hasTauriCommandBridge()) {
+      setCreateState("error");
+      setCreateError("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setCreateState("applying");
+    setCreateError("");
+    const command = plan.runtime === "openclaw" ? "apply_create_agent" : "apply_create_profile";
+    invoke<LifecycleResult>(command, {
+      request: { plan },
+    })
+      .then((result) => {
+        setCreateState("success");
+        setCreateResult(result);
+        setRescanRequestId((current) => current + 1);
+        setRuntimeDetectionRequestId((current) => current + 1);
+      })
+      .catch((error: unknown) => {
+        setCreateState("error");
+        setCreateError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function dismissCreateLifecyclePlan() {
+    setCreatePanelOpen(false);
+    setCreatePlan(null);
+    setCreateState("idle");
+    setCreateResult(null);
+    setCreateError("");
+  }
+
+  function openCopyPanel(agent: ManagedAgent) {
+    setCopyPanelOpen(true);
+    setCopyName(`${agent.displayName}-copy`);
+    setCopyPlan(null);
+    setCopyState("idle");
+    setCopyResult(null);
+    setCopyError("");
+  }
+
+  function requestCopyLifecyclePlan(agent: ManagedAgent) {
+    const newName = copyName.trim();
+    if (!newName) {
+      setCopyState("error");
+      setCopyError("请输入复制后的 Agent/Profile 名称。");
+      return;
+    }
+    if (!hasTauriCommandBridge()) {
+      setCopyState("error");
+      setCopyError("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setCopyState("planning");
+    setCopyError("");
+    setCopyResult(null);
+    invoke<LifecyclePlan>("duplicate_agent_plan", {
+      request: {
+        sourceAgentId: agent.id,
+        newName,
+      },
+    })
+      .then((plan) => {
+        setCopyPlan(plan);
+        setCopyState("idle");
+      })
+      .catch((error: unknown) => {
+        setCopyState("error");
+        setCopyError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function applyCopyLifecyclePlan(plan: LifecyclePlan) {
+    if (!hasTauriCommandBridge()) {
+      setCopyState("error");
+      setCopyError("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setCopyState("applying");
+    setCopyError("");
+    invoke<LifecycleResult>("apply_duplicate_agent", {
+      request: { plan },
+    })
+      .then((result) => {
+        setCopyState("success");
+        setCopyResult(result);
+        setRescanRequestId((current) => current + 1);
+        setRuntimeDetectionRequestId((current) => current + 1);
+      })
+      .catch((error: unknown) => {
+        setCopyState("error");
+        setCopyError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function dismissCopyLifecyclePlan() {
+    setCopyPanelOpen(false);
+    setCopyPlan(null);
+    setCopyState("idle");
+    setCopyResult(null);
+    setCopyError("");
   }
 
   function applyDeleteAgentPlan(plan: DeleteAgentMutationPlan) {
@@ -640,6 +913,10 @@ export function App() {
             runtimeUpdateMessage={runtimeUpdateMessage}
             runtimeUpdateState={runtimeUpdateState}
             onRequestRuntimeUpdate={requestRuntimeUpdate}
+            onToggleRuntimeVersionDetail={toggleRuntimeVersionDetail}
+            versionDetail={versionDetail}
+            versionDetailError={versionDetailError}
+            versionDetailState={versionDetailState}
             onRequestDeleteAgentPlan={requestDeleteAgentPlan}
             deleteAgentPlan={deleteAgentPlan}
             onDismissDeletePlan={dismissDeletePlan}
@@ -652,6 +929,32 @@ export function App() {
             restorePlanError={restorePlanError}
             onRequestRestorePlan={requestRestorePlan}
             onDismissRestorePlan={dismissRestorePlan}
+            onApplyRestoreTrashItem={applyRestoreTrashItem}
+            restoreApplyState={restoreApplyState}
+            restoreApplyResult={restoreApplyResult}
+            restoreApplyError={restoreApplyError}
+            createPanelOpen={createPanelOpen}
+            createName={createName}
+            createPlan={createPlan}
+            createState={createState}
+            createResult={createResult}
+            createError={createError}
+            onOpenCreatePanel={openCreatePanel}
+            onChangeCreateName={setCreateName}
+            onRequestCreateLifecyclePlan={requestCreateLifecyclePlan}
+            onApplyCreateLifecyclePlan={applyCreateLifecyclePlan}
+            onDismissCreateLifecyclePlan={dismissCreateLifecyclePlan}
+            copyPanelOpen={copyPanelOpen}
+            copyName={copyName}
+            copyPlan={copyPlan}
+            copyState={copyState}
+            copyResult={copyResult}
+            copyError={copyError}
+            onOpenCopyPanel={openCopyPanel}
+            onChangeCopyName={setCopyName}
+            onRequestCopyLifecyclePlan={requestCopyLifecyclePlan}
+            onApplyCopyLifecyclePlan={applyCopyLifecyclePlan}
+            onDismissCopyLifecyclePlan={dismissCopyLifecyclePlan}
             setExpandedItem={setExpandedItem}
             setSelectedItem={setSelectedItem}
             setSelectedOperation={setSelectedOperation}
@@ -684,6 +987,10 @@ function DashboardView({
   runtimeUpdateMessage,
   runtimeUpdateState,
   onRequestRuntimeUpdate,
+  onToggleRuntimeVersionDetail,
+  versionDetail,
+  versionDetailError,
+  versionDetailState,
   onRequestDeleteAgentPlan,
   deleteAgentPlan,
   onDismissDeletePlan,
@@ -696,6 +1003,32 @@ function DashboardView({
   restorePlanError,
   onRequestRestorePlan,
   onDismissRestorePlan,
+  onApplyRestoreTrashItem,
+  restoreApplyState,
+  restoreApplyResult,
+  restoreApplyError,
+  createPanelOpen,
+  createName,
+  createPlan,
+  createState,
+  createResult,
+  createError,
+  onOpenCreatePanel,
+  onChangeCreateName,
+  onRequestCreateLifecyclePlan,
+  onApplyCreateLifecyclePlan,
+  onDismissCreateLifecyclePlan,
+  copyPanelOpen,
+  copyName,
+  copyPlan,
+  copyState,
+  copyResult,
+  copyError,
+  onOpenCopyPanel,
+  onChangeCopyName,
+  onRequestCopyLifecyclePlan,
+  onApplyCopyLifecyclePlan,
+  onDismissCopyLifecyclePlan,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -719,6 +1052,10 @@ function DashboardView({
   runtimeUpdateMessage: string;
   runtimeUpdateState: "idle" | "running" | "success" | "error";
   onRequestRuntimeUpdate: (product: RuntimeProduct) => void;
+  onToggleRuntimeVersionDetail: (product: RuntimeProduct) => void;
+  versionDetail: RuntimeVersionDetail | null;
+  versionDetailError: string;
+  versionDetailState: "idle" | "loading" | "error";
   onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
   deleteAgentPlan: DeleteAgentMutationPlan | null;
   onDismissDeletePlan: () => void;
@@ -731,6 +1068,32 @@ function DashboardView({
   restorePlanError: string;
   onRequestRestorePlan: (trashTargetPath: string) => void;
   onDismissRestorePlan: () => void;
+  onApplyRestoreTrashItem: (plan: RestoreTrashItemPlan) => void;
+  restoreApplyState: "idle" | "running" | "success" | "error";
+  restoreApplyResult: RestoreTrashItemResult | null;
+  restoreApplyError: string;
+  createPanelOpen: boolean;
+  createName: string;
+  createPlan: LifecyclePlan | null;
+  createState: "idle" | "planning" | "applying" | "success" | "error";
+  createResult: LifecycleResult | null;
+  createError: string;
+  onOpenCreatePanel: (runtimeProduct: RuntimeProduct) => void;
+  onChangeCreateName: (name: string) => void;
+  onRequestCreateLifecyclePlan: (runtime: DashboardRuntime) => void;
+  onApplyCreateLifecyclePlan: (plan: LifecyclePlan) => void;
+  onDismissCreateLifecyclePlan: () => void;
+  copyPanelOpen: boolean;
+  copyName: string;
+  copyPlan: LifecyclePlan | null;
+  copyState: "idle" | "planning" | "applying" | "success" | "error";
+  copyResult: LifecycleResult | null;
+  copyError: string;
+  onOpenCopyPanel: (agent: ManagedAgent) => void;
+  onChangeCopyName: (name: string) => void;
+  onRequestCopyLifecyclePlan: (agent: ManagedAgent) => void;
+  onApplyCopyLifecyclePlan: (plan: LifecyclePlan) => void;
+  onDismissCopyLifecyclePlan: () => void;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -792,6 +1155,10 @@ function DashboardView({
           setSelectedItem={setSelectedItem}
           setSelectedOperation={setSelectedOperation}
           onRequestRuntimeUpdate={onRequestRuntimeUpdate}
+          onToggleRuntimeVersionDetail={onToggleRuntimeVersionDetail}
+          versionDetail={versionDetail}
+          versionDetailError={versionDetailError}
+          versionDetailState={versionDetailState}
           onRequestDeleteAgentPlan={onRequestDeleteAgentPlan}
           deleteAgentPlan={deleteAgentPlan}
           onDismissDeletePlan={onDismissDeletePlan}
@@ -804,6 +1171,32 @@ function DashboardView({
           restorePlanError={restorePlanError}
           onRequestRestorePlan={onRequestRestorePlan}
           onDismissRestorePlan={onDismissRestorePlan}
+          onApplyRestoreTrashItem={onApplyRestoreTrashItem}
+          restoreApplyState={restoreApplyState}
+          restoreApplyResult={restoreApplyResult}
+          restoreApplyError={restoreApplyError}
+          createPanelOpen={createPanelOpen}
+          createName={createName}
+          createPlan={createPlan}
+          createState={createState}
+          createResult={createResult}
+          createError={createError}
+          onOpenCreatePanel={onOpenCreatePanel}
+          onChangeCreateName={onChangeCreateName}
+          onRequestCreateLifecyclePlan={onRequestCreateLifecyclePlan}
+          onApplyCreateLifecyclePlan={onApplyCreateLifecyclePlan}
+          onDismissCreateLifecyclePlan={onDismissCreateLifecyclePlan}
+          copyPanelOpen={copyPanelOpen}
+          copyName={copyName}
+          copyPlan={copyPlan}
+          copyState={copyState}
+          copyResult={copyResult}
+          copyError={copyError}
+          onOpenCopyPanel={onOpenCopyPanel}
+          onChangeCopyName={onChangeCopyName}
+          onRequestCopyLifecyclePlan={onRequestCopyLifecyclePlan}
+          onApplyCopyLifecyclePlan={onApplyCopyLifecyclePlan}
+          onDismissCopyLifecyclePlan={onDismissCopyLifecyclePlan}
         />
       ) : (
         <NotInstalledDashboard runtime={runtime} />
@@ -846,6 +1239,10 @@ function InstalledDashboard({
   selectedOperation,
   selectedOperationNode,
   onRequestRuntimeUpdate,
+  onToggleRuntimeVersionDetail,
+  versionDetail,
+  versionDetailError,
+  versionDetailState,
   onRequestDeleteAgentPlan,
   deleteAgentPlan,
   onDismissDeletePlan,
@@ -858,6 +1255,32 @@ function InstalledDashboard({
   restorePlanError,
   onRequestRestorePlan,
   onDismissRestorePlan,
+  onApplyRestoreTrashItem,
+  restoreApplyState,
+  restoreApplyResult,
+  restoreApplyError,
+  createPanelOpen,
+  createName,
+  createPlan,
+  createState,
+  createResult,
+  createError,
+  onOpenCreatePanel,
+  onChangeCreateName,
+  onRequestCreateLifecyclePlan,
+  onApplyCreateLifecyclePlan,
+  onDismissCreateLifecyclePlan,
+  copyPanelOpen,
+  copyName,
+  copyPlan,
+  copyState,
+  copyResult,
+  copyError,
+  onOpenCopyPanel,
+  onChangeCopyName,
+  onRequestCopyLifecyclePlan,
+  onApplyCopyLifecyclePlan,
+  onDismissCopyLifecyclePlan,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -875,6 +1298,10 @@ function InstalledDashboard({
   selectedOperation: OperationNode;
   selectedOperationNode: { id: OperationNode; label: string; description: string };
   onRequestRuntimeUpdate: (product: RuntimeProduct) => void;
+  onToggleRuntimeVersionDetail: (product: RuntimeProduct) => void;
+  versionDetail: RuntimeVersionDetail | null;
+  versionDetailError: string;
+  versionDetailState: "idle" | "loading" | "error";
   onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
   deleteAgentPlan: DeleteAgentMutationPlan | null;
   onDismissDeletePlan: () => void;
@@ -887,6 +1314,32 @@ function InstalledDashboard({
   restorePlanError: string;
   onRequestRestorePlan: (trashTargetPath: string) => void;
   onDismissRestorePlan: () => void;
+  onApplyRestoreTrashItem: (plan: RestoreTrashItemPlan) => void;
+  restoreApplyState: "idle" | "running" | "success" | "error";
+  restoreApplyResult: RestoreTrashItemResult | null;
+  restoreApplyError: string;
+  createPanelOpen: boolean;
+  createName: string;
+  createPlan: LifecyclePlan | null;
+  createState: "idle" | "planning" | "applying" | "success" | "error";
+  createResult: LifecycleResult | null;
+  createError: string;
+  onOpenCreatePanel: (runtimeProduct: RuntimeProduct) => void;
+  onChangeCreateName: (name: string) => void;
+  onRequestCreateLifecyclePlan: (runtime: DashboardRuntime) => void;
+  onApplyCreateLifecyclePlan: (plan: LifecyclePlan) => void;
+  onDismissCreateLifecyclePlan: () => void;
+  copyPanelOpen: boolean;
+  copyName: string;
+  copyPlan: LifecyclePlan | null;
+  copyState: "idle" | "planning" | "applying" | "success" | "error";
+  copyResult: LifecycleResult | null;
+  copyError: string;
+  onOpenCopyPanel: (agent: ManagedAgent) => void;
+  onChangeCopyName: (name: string) => void;
+  onRequestCopyLifecyclePlan: (agent: ManagedAgent) => void;
+  onApplyCopyLifecyclePlan: (plan: LifecyclePlan) => void;
+  onDismissCopyLifecyclePlan: () => void;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -896,7 +1349,14 @@ function InstalledDashboard({
       <section className="runtimeStatus" aria-label={`${runtime.label} runtime status`}>
         <div>
           <span>Version</span>
-          <strong>{runtime.version ?? "未读取到"}</strong>
+          <button
+            className="versionLink"
+            type="button"
+            aria-expanded={versionDetail?.product === runtime.product || versionDetailState !== "idle"}
+            onClick={() => onToggleRuntimeVersionDetail(runtime.product)}
+          >
+            {runtime.version ?? "未读取到"}
+          </button>
           {runtime.updateAvailable ? (
             <button
               className="inlineUpdateButton"
@@ -908,6 +1368,30 @@ function InstalledDashboard({
             </button>
           ) : null}
         </div>
+        {versionDetail?.product === runtime.product ||
+        versionDetailState === "loading" ||
+        versionDetailState === "error" ? (
+          <div className="versionPopover" role="dialog" aria-label={`${runtime.label} version details`}>
+            {versionDetailState === "loading" ? <span>正在查询版本详情...</span> : null}
+            {versionDetailState === "error" ? (
+              <span>{versionDetailError || "版本详情查询失败。"}</span>
+            ) : null}
+            {versionDetail?.product === runtime.product ? (
+              <div className="versionDetailRows">
+                {versionDetail.lines.map((line) => (
+                  <code className="versionDetailLine" key={line}>
+                    {line}
+                  </code>
+                ))}
+                {versionDetail.warnings.map((warning) => (
+                  <div className="versionDetailWarning" key={warning}>
+                    {warning}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </section>
       {runtimeUpdateState === "error" ? (
         <section className="runtimeUpdateNotice runtimeUpdateNoticeWarning">
@@ -924,10 +1408,6 @@ function InstalledDashboard({
               <h3>{runtime.entityLabel} 列表</h3>
             </div>
           </div>
-
-          <button className="addAgentButton" type="button" disabled>
-            {runtime.addLabel}
-          </button>
 
           {runtimeAgents.length === 0 ? (
             <div className="emptyTreeState">
@@ -979,6 +1459,28 @@ function InstalledDashboard({
             })}
             </div>
           )}
+
+          <div className="treeFooterActions" aria-label={`${runtime.entityLabel} lifecycle actions`}>
+            <button className="addAgentButton" type="button" onClick={() => onOpenCreatePanel(runtime.product)}>
+              {runtime.addLabel}
+            </button>
+            <span>创建必须先生成计划预览，确认后才会写入。</span>
+            {createPanelOpen ? (
+              <LifecyclePlanPanel
+                actionLabel="创建"
+                inputLabel="新名称"
+                inputValue={createName}
+                plan={createPlan}
+                state={createState}
+                result={createResult}
+                error={createError}
+                onInputChange={onChangeCreateName}
+                onRequestPlan={() => onRequestCreateLifecyclePlan(runtime)}
+                onApplyPlan={onApplyCreateLifecyclePlan}
+                onDismiss={onDismissCreateLifecyclePlan}
+              />
+            ) : null}
+          </div>
         </article>
 
         <article className="operationPane">
@@ -998,6 +1500,21 @@ function InstalledDashboard({
               restorePlanError={restorePlanError}
               onRequestRestorePlan={onRequestRestorePlan}
               onDismissRestorePlan={onDismissRestorePlan}
+              onApplyRestoreTrashItem={onApplyRestoreTrashItem}
+              restoreApplyState={restoreApplyState}
+              restoreApplyResult={restoreApplyResult}
+              restoreApplyError={restoreApplyError}
+              copyPanelOpen={copyPanelOpen}
+              copyName={copyName}
+              copyPlan={copyPlan}
+              copyState={copyState}
+              copyResult={copyResult}
+              copyError={copyError}
+              onOpenCopyPanel={onOpenCopyPanel}
+              onChangeCopyName={onChangeCopyName}
+              onRequestCopyLifecyclePlan={onRequestCopyLifecyclePlan}
+              onApplyCopyLifecyclePlan={onApplyCopyLifecyclePlan}
+              onDismissCopyLifecyclePlan={onDismissCopyLifecyclePlan}
             />
           ) : (
             <PlaceholderOperationPane
@@ -1009,6 +1526,128 @@ function InstalledDashboard({
         </article>
       </section>
     </>
+  );
+}
+
+function LifecyclePlanPanel({
+  actionLabel,
+  inputLabel,
+  inputValue,
+  plan,
+  state,
+  result,
+  error,
+  onInputChange,
+  onRequestPlan,
+  onApplyPlan,
+  onDismiss,
+}: {
+  actionLabel: string;
+  inputLabel: string;
+  inputValue: string;
+  plan: LifecyclePlan | null;
+  state: "idle" | "planning" | "applying" | "success" | "error";
+  result: LifecycleResult | null;
+  error: string;
+  onInputChange: (value: string) => void;
+  onRequestPlan: () => void;
+  onApplyPlan: (plan: LifecyclePlan) => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <section className="lifecyclePlanPanel" aria-label={`${actionLabel} Agent/Profile plan`}>
+      <label>
+        <span>{inputLabel}</span>
+        <input
+          type="text"
+          value={inputValue}
+          disabled={state === "applying" || state === "success"}
+          onChange={(event) => onInputChange(event.target.value)}
+        />
+      </label>
+      <div className="lifecyclePlanActions">
+        <button
+          className="secondaryButton compactActionButton"
+          type="button"
+          disabled={state === "planning" || state === "applying" || state === "success"}
+          onClick={onRequestPlan}
+        >
+          {state === "planning" ? "生成中..." : `生成${actionLabel}计划`}
+        </button>
+        <button className="previewCancelButton" type="button" onClick={onDismiss}>
+          取消
+        </button>
+      </div>
+      {plan ? (
+        <div className="lifecyclePlanPreview">
+          <h4>{actionLabel}计划预览</h4>
+          <dl className="detailGrid">
+            <div>
+              <dt>操作</dt>
+              <dd>{plan.operation}</dd>
+            </div>
+            <div>
+              <dt>目标路径</dt>
+              <dd>{plan.targetPath}</dd>
+            </div>
+            <div>
+              <dt>计划哈希</dt>
+              <dd>{plan.planHash}</dd>
+            </div>
+            <div>
+              <dt>计划写入项</dt>
+              <dd>{plan.willCreateFiles.length || plan.includedFiles.length}</dd>
+            </div>
+          </dl>
+          {plan.sourcePath ? (
+            <div className="previewExplanation">来源路径：{plan.sourcePath}</div>
+          ) : null}
+          {plan.skippedItems.length > 0 ? (
+            <div className="warningList">
+              {plan.skippedItems.map((item) => (
+                <span key={item}>跳过：{item}</span>
+              ))}
+            </div>
+          ) : null}
+          {plan.warnings.length > 0 ? (
+            <div className="warningList">
+              {plan.warnings.map((warning) => (
+                <span key={warning}>{warning}</span>
+              ))}
+            </div>
+          ) : null}
+          {plan.blockedReason ? <div className="previewBlocked">{plan.blockedReason}</div> : null}
+          {state === "success" && result ? (
+            <div className="previewSuccess">
+              <strong>{actionLabel}完成</strong>
+              <span>目标路径：{result.targetPath}</span>
+            </div>
+          ) : null}
+          {state === "error" ? (
+            <div className="previewError">
+              <strong>{actionLabel}失败</strong>
+              <span>{error}</span>
+            </div>
+          ) : null}
+          {plan.blockedReason ? null : (
+            <button
+              className="previewConfirmButton"
+              type="button"
+              disabled={state === "applying" || state === "success"}
+              onClick={() => onApplyPlan(plan)}
+            >
+              {state === "applying" ? "执行中..." : `确认${actionLabel}`}
+            </button>
+          )}
+        </div>
+      ) : null}
+      {state === "error" && !plan ? (
+        <div className="previewError">
+          <strong>{actionLabel}计划失败</strong>
+          <span>{error}</span>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -1027,6 +1666,21 @@ function BasicSettingsPane({
   restorePlanError,
   onRequestRestorePlan,
   onDismissRestorePlan,
+  onApplyRestoreTrashItem,
+  restoreApplyState,
+  restoreApplyResult,
+  restoreApplyError,
+  copyPanelOpen,
+  copyName,
+  copyPlan,
+  copyState,
+  copyResult,
+  copyError,
+  onOpenCopyPanel,
+  onChangeCopyName,
+  onRequestCopyLifecyclePlan,
+  onApplyCopyLifecyclePlan,
+  onDismissCopyLifecyclePlan,
 }: {
   onRequestDeleteAgentPlan: (agent: ManagedAgent) => void;
   runtime: DashboardRuntime;
@@ -1042,6 +1696,21 @@ function BasicSettingsPane({
   restorePlanError: string;
   onRequestRestorePlan: (trashTargetPath: string) => void;
   onDismissRestorePlan: () => void;
+  onApplyRestoreTrashItem: (plan: RestoreTrashItemPlan) => void;
+  restoreApplyState: "idle" | "running" | "success" | "error";
+  restoreApplyResult: RestoreTrashItemResult | null;
+  restoreApplyError: string;
+  copyPanelOpen: boolean;
+  copyName: string;
+  copyPlan: LifecyclePlan | null;
+  copyState: "idle" | "planning" | "applying" | "success" | "error";
+  copyResult: LifecycleResult | null;
+  copyError: string;
+  onOpenCopyPanel: (agent: ManagedAgent) => void;
+  onChangeCopyName: (name: string) => void;
+  onRequestCopyLifecyclePlan: (agent: ManagedAgent) => void;
+  onApplyCopyLifecyclePlan: (plan: LifecyclePlan) => void;
+  onDismissCopyLifecyclePlan: () => void;
 }) {
   if (!selectedAgent) {
     return (
@@ -1067,21 +1736,31 @@ function BasicSettingsPane({
           <p className="eyebrow">Basic Settings</p>
           <h3>{selectedAgent.displayName}</h3>
         </div>
-        <button
-          className="trashIconButton"
-          type="button"
-          aria-label="删除/回收"
-          title="生成删除/回收计划"
-          onClick={() => onRequestDeleteAgentPlan(selectedAgent)}
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24">
-            <path d="M3 6h18" />
-            <path d="M8 6V4h8v2" />
-            <path d="M6 6l1 15h10l1-15" />
-            <path d="M10 11v6" />
-            <path d="M14 11v6" />
-          </svg>
-        </button>
+        <div className="operationTitleActions">
+          <button
+            className="secondaryButton compactActionButton"
+            type="button"
+            title="生成复制 Agent/Profile 计划"
+            onClick={() => onOpenCopyPanel(selectedAgent)}
+          >
+            复制
+          </button>
+          <button
+            className="trashIconButton"
+            type="button"
+            aria-label="删除/回收"
+            title="生成删除/回收计划"
+            onClick={() => onRequestDeleteAgentPlan(selectedAgent)}
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M3 6h18" />
+              <path d="M8 6V4h8v2" />
+              <path d="M6 6l1 15h10l1-15" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <section className="basicSettingsForm" aria-label="Basic settings">
@@ -1101,6 +1780,8 @@ function BasicSettingsPane({
           <DetailItem label="运行时类型" value={runtime.label} />
           <DetailItem label="Agent/Profile kind" value={selectedAgent.agentKind} />
           <DetailItem label="Agent/Profile ID" value={selectedAgent.id} />
+          <DetailItem label="Workspace/Profile path" value={selectedAgent.workspaceOrProfilePath} />
+          <DetailItem label="配置文件路径" value={formatConfigPath(selectedAgent)} />
           <DetailItem label="CLI-agent启动命令" value={selectedAgent.launchCommand ?? "未扫描"} />
           <div>
             <dt>Agent环境变量路径</dt>
@@ -1145,6 +1826,22 @@ function BasicSettingsPane({
         </dl>
       </section>
 
+      {copyPanelOpen ? (
+        <LifecyclePlanPanel
+          actionLabel="复制"
+          inputLabel="复制为"
+          inputValue={copyName}
+          plan={copyPlan}
+          state={copyState}
+          result={copyResult}
+          error={copyError}
+          onInputChange={onChangeCopyName}
+          onRequestPlan={() => onRequestCopyLifecyclePlan(selectedAgent)}
+          onApplyPlan={onApplyCopyLifecyclePlan}
+          onDismiss={onDismissCopyLifecyclePlan}
+        />
+      ) : null}
+
       {deleteAgentPlan ? (
         <section className="deletePlanPreview" aria-label="Delete agent plan preview">
           <h4>删除/回收计划预览</h4>
@@ -1177,7 +1874,7 @@ function BasicSettingsPane({
             <div className="previewBlocked">{deleteAgentPlan.blockedReason}</div>
           ) : null}
           <div className="previewExplanation">
-            这不会永久删除文件。AgentDock 会先创建备份，再将该 Agent/Profile 移入本地 Trash。移入后它会从 AgentDock 管理列表中移除；如果 Gateway 或 channel 已缓存该 Agent，可能需要重启 Gateway 后才会完全失效。
+            这不会彻底移除文件。AgentDock 会先创建备份，再将该 Agent/Profile 移入本地 Trash。移入后它会从 AgentDock 管理列表中移除；如果 Gateway 或 channel 已缓存该 Agent，可能需要重启 Gateway 后才会完全失效。
           </div>
           {deleteAgentApplyState === "success" && deleteAgentApplyResult ? (
             <div className="previewSuccess">
@@ -1269,9 +1966,30 @@ function BasicSettingsPane({
                 <div className="previewBlocked">{restorePlan.blockedReason}</div>
               ) : null}
               <div className="previewExplanation">
-                这只是恢复计划的预览，不会移动任何文件。恢复会将该 Agent/Profile 从 Trash
-                移回到原始路径。如果原始路径已存在同名目录，恢复计划会被阻止。
+                恢复会将该 Agent/Profile 从 Trash 移回到原始路径。如果原始路径已存在同名目录，恢复计划会被阻止。
               </div>
+              {restoreApplyState === "success" && restoreApplyResult ? (
+                <div className="previewSuccess">
+                  <strong>恢复完成</strong>
+                  <span>该 Agent/Profile 已恢复到 {restoreApplyResult.targetPath}。</span>
+                </div>
+              ) : null}
+              {restoreApplyState === "error" ? (
+                <div className="previewError">
+                  <strong>恢复失败</strong>
+                  <span>{restoreApplyError}</span>
+                </div>
+              ) : null}
+              {restorePlan.blockedReason ? null : (
+                <button
+                  className="previewConfirmButton"
+                  type="button"
+                  disabled={restoreApplyState === "running" || restoreApplyState === "success"}
+                  onClick={() => onApplyRestoreTrashItem(restorePlan)}
+                >
+                  {restoreApplyState === "running" ? "恢复中..." : "确认恢复"}
+                </button>
+              )}
               <button className="previewCancelButton" type="button" onClick={onDismissRestorePlan}>
                 取消
               </button>
@@ -1340,6 +2058,8 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 
 
 function NotInstalledDashboard({ runtime }: { runtime: DashboardRuntime }) {
+  const installCommand = recommendedInstallCommand(runtime.product);
+
   return (
     <section className="notInstalledPanel">
       <div>
@@ -1353,6 +2073,16 @@ function NotInstalledDashboard({ runtime }: { runtime: DashboardRuntime }) {
       <button type="button" disabled>
         安装 {runtime.label}
       </button>
+      <div className="commandPreview">
+        <span>官方推荐安装命令预览</span>
+        <code>{installCommand}</code>
+      </div>
+      <div className="safetyList">
+        <span>安装按钮当前为 disabled placeholder，不会执行命令。</span>
+        <span>正式安装前必须选择安装方式和安装位置。</span>
+        <span>执行前必须再次展示命令预览、跳过选项、备份点和安装后重扫选项。</span>
+        <span>AgentDock 不上传本地配置、会话、记忆或 secret。</span>
+      </div>
       <div className="commandPreview">
         <span>检测结果</span>
         <code>
@@ -1625,6 +2355,14 @@ function getBrowserManagedAgentFallback(): ManagedAgent[] {
   ];
 }
 
+function getBrowserVersionDetailFallback(product: RuntimeProduct) {
+  if (product === "openclaw") {
+    return ["OpenClaw v0.0.0-fixture", "Update status: fixture only"];
+  }
+
+  return ["Hermes Agent v0.0.0-fixture", "Python: fixture", "OpenAI SDK: fixture", "Update status: fixture only"];
+}
+
 function browserFixtureAgent(product: RuntimeProduct, item: string): ManagedAgent {
   const runtime = mockRuntimes[product];
   return {
@@ -1685,6 +2423,27 @@ function formatGateway(gatewayRunning?: boolean | null) {
 
 function agentEnvPath(agent: ManagedAgent) {
   return `${agent.workspaceOrProfilePath}/.env`;
+}
+
+function formatConfigPath(agent: ManagedAgent) {
+  return agent.configFiles.find((file) => !file.sensitive && !file.skipped)?.path ?? agent.configRoot;
+}
+
+function recommendedInstallCommand(product: RuntimeProduct) {
+  if (product === "openclaw") {
+    return "curl -fsSL https://openclaw.ai/install.sh | bash";
+  }
+
+  return "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash";
+}
+
+function createTargetRoot(runtime: DashboardRuntime, name: string) {
+  if (!runtime.homeDir) {
+    return undefined;
+  }
+
+  const base = runtime.homeDir.replace(/\/$/, "");
+  return runtime.product === "openclaw" ? `${base}/agents/${name}` : `${base}/profiles/${name}`;
 }
 
 function formatLastModified(value?: string | null) {
