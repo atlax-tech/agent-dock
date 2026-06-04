@@ -99,6 +99,7 @@ pub struct ProviderProfile {
     pub fallback_model: Option<String>,
     pub validation_json: String,
     pub updated_at: String,
+    pub sort_index: Option<i64>,
 }
 
 pub fn initialize_database() -> Result<DatabaseReport, DatabaseError> {
@@ -181,7 +182,8 @@ fn create_schema(connection: &Connection) -> Result<(), DatabaseError> {
           default_model TEXT,
           fallback_model TEXT,
           validation_json TEXT NOT NULL,
-          updated_at TEXT NOT NULL
+          updated_at TEXT NOT NULL,
+          sort_index INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS backups (
@@ -276,6 +278,7 @@ fn migrate_phase_one_columns(connection: &Connection) -> Result<(), DatabaseErro
     add_column_if_missing(connection, "backups", "original_path", "TEXT")?;
     add_column_if_missing(connection, "backups", "content_hash_before", "TEXT")?;
     add_column_if_missing(connection, "backups", "content_hash_after", "TEXT")?;
+    add_column_if_missing(connection, "provider_profiles", "sort_index", "INTEGER")?;
     Ok(())
 }
 
@@ -556,9 +559,9 @@ pub fn upsert_provider_profile(
         r#"
         INSERT INTO provider_profiles
           (id, name, kind, base_url, api_key_ref, default_model, fallback_model,
-           validation_json, updated_at)
+           validation_json, updated_at, sort_index)
         VALUES
-          (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+          (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         ON CONFLICT(id) DO UPDATE SET
           name = excluded.name,
           kind = excluded.kind,
@@ -567,7 +570,8 @@ pub fn upsert_provider_profile(
           default_model = excluded.default_model,
           fallback_model = excluded.fallback_model,
           validation_json = excluded.validation_json,
-          updated_at = excluded.updated_at
+          updated_at = excluded.updated_at,
+          sort_index = excluded.sort_index
         "#,
         params![
             &profile.id,
@@ -579,6 +583,7 @@ pub fn upsert_provider_profile(
             profile.fallback_model.as_deref(),
             &profile.validation_json,
             &profile.updated_at,
+            profile.sort_index,
         ],
     )?;
     Ok(())
@@ -590,9 +595,13 @@ pub fn load_provider_profiles(
     let mut statement = connection.prepare(
         r#"
         SELECT id, name, kind, base_url, api_key_ref, default_model, fallback_model,
-               validation_json, updated_at
+               validation_json, updated_at, sort_index
         FROM provider_profiles
-        ORDER BY updated_at DESC, name
+        ORDER BY
+          CASE WHEN sort_index IS NULL THEN 1 ELSE 0 END,
+          sort_index ASC,
+          updated_at DESC,
+          name
         "#,
     )?;
     let rows = statement.query_map([], |row| {
@@ -607,10 +616,31 @@ pub fn load_provider_profiles(
             fallback_model: row.get(6)?,
             validation_json: row.get(7)?,
             updated_at: row.get(8)?,
+            sort_index: row.get(9)?,
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(DatabaseError::from)
+}
+
+pub fn delete_provider_profile(connection: &Connection, id: &str) -> Result<(), DatabaseError> {
+    connection.execute("DELETE FROM provider_profiles WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+pub fn update_provider_profile_sort_order(
+    connection: &mut Connection,
+    ordered_ids: &[String],
+) -> Result<(), DatabaseError> {
+    let transaction = connection.transaction()?;
+    for (index, id) in ordered_ids.iter().enumerate() {
+        transaction.execute(
+            "UPDATE provider_profiles SET sort_index = ?1 WHERE id = ?2",
+            params![index as i64, id],
+        )?;
+    }
+    transaction.commit()?;
+    Ok(())
 }
 
 fn reject_secret_like_profile_values(profile: &ProviderProfile) -> Result<(), DatabaseError> {
@@ -775,6 +805,7 @@ mod tests {
             fallback_model: Some("gpt-fallback".to_string()),
             validation_json: "{\"status\":\"ok\"}".to_string(),
             updated_at: "1".to_string(),
+            sort_index: Some(0),
         };
 
         upsert_provider_profile(&connection, &profile).expect("upsert provider profile");
@@ -800,6 +831,7 @@ mod tests {
             fallback_model: None,
             validation_json: "{}".to_string(),
             updated_at: "1".to_string(),
+            sort_index: None,
         };
 
         let error = upsert_provider_profile(&connection, &profile).expect_err("secret rejected");

@@ -177,7 +177,17 @@ fn merge_metadata(
         .base_url
         .clone()
         .or_else(|| string_at(value, &["base_url"]).map(str::to_string))
-        .or_else(|| string_at(value, &["provider", "base_url"]).map(str::to_string));
+        .or_else(|| string_at(value, &["baseURL"]).map(str::to_string))
+        .or_else(|| string_at(value, &["baseUrl"]).map(str::to_string))
+        .or_else(|| string_at(value, &["endpoint"]).map(str::to_string))
+        .or_else(|| string_at(value, &["provider", "base_url"]).map(str::to_string))
+        .or_else(|| string_at(value, &["provider", "baseURL"]).map(str::to_string))
+        .or_else(|| string_at(value, &["provider", "baseUrl"]).map(str::to_string))
+        .or_else(|| string_at(value, &["provider", "endpoint"]).map(str::to_string))
+        .or_else(|| string_at(value, &["model", "base_url"]).map(str::to_string))
+        .or_else(|| string_at(value, &["model", "baseURL"]).map(str::to_string))
+        .or_else(|| string_at(value, &["model", "baseUrl"]).map(str::to_string))
+        .or_else(|| string_at(value, &["model", "endpoint"]).map(str::to_string));
     model_summary.default_model = model_summary
         .default_model
         .clone()
@@ -188,6 +198,7 @@ fn merge_metadata(
         .clone()
         .or_else(|| string_at(value, &["fallback_model"]).map(str::to_string))
         .or_else(|| string_at(value, &["model", "fallback"]).map(str::to_string));
+    collect_hermes_configured_models(value, provider_summary, model_summary);
 
     provider_summary
         .secret_fields
@@ -196,6 +207,108 @@ fn merge_metadata(
     provider_summary.secret_fields.dedup();
 
     collect_channel_hints(value, channel_summary);
+}
+
+fn collect_hermes_configured_models(
+    value: &Value,
+    provider_summary: &ProviderSummary,
+    model_summary: &mut ModelSummary,
+) {
+    if let Some(model_id) = model_summary.default_model.clone() {
+        push_configured_model(
+            model_summary,
+            ConfiguredModelSummary {
+                name: model_id.clone(),
+                model_id,
+                provider: string_at(value, &["model", "provider"])
+                    .map(str::to_string)
+                    .or_else(|| provider_summary.provider.clone()),
+                base_url: provider_summary.base_url.clone(),
+                default_model: true,
+                fallback_model: false,
+                source: "model.default".to_string(),
+            },
+        );
+    }
+
+    if let Some(fallbacks) = value.get("fallback_providers").and_then(Value::as_array) {
+        for fallback in fallbacks {
+            let Some(model_id) = string_at(fallback, &["model"]).map(str::to_string) else {
+                continue;
+            };
+            if model_summary.fallback_model.is_none() {
+                model_summary.fallback_model = Some(model_id.clone());
+            }
+            push_configured_model(
+                model_summary,
+                ConfiguredModelSummary {
+                    name: model_id.clone(),
+                    model_id,
+                    provider: string_at(fallback, &["provider"])
+                        .map(str::to_string)
+                        .or_else(|| provider_summary.provider.clone()),
+                    base_url: base_url_from_value(fallback).or_else(|| provider_summary.base_url.clone()),
+                    default_model: false,
+                    fallback_model: true,
+                    source: "fallback_providers".to_string(),
+                },
+            );
+        }
+    }
+
+    if let Some(aliases) = value.get("model_aliases").and_then(Value::as_object) {
+        for (alias, alias_value) in aliases {
+            let Some(model_id) = string_at(alias_value, &["model"]).map(str::to_string) else {
+                continue;
+            };
+            push_configured_model(
+                model_summary,
+                ConfiguredModelSummary {
+                    name: alias.clone(),
+                    model_id,
+                    provider: string_at(alias_value, &["provider"])
+                        .map(str::to_string)
+                        .or_else(|| provider_summary.provider.clone()),
+                    base_url: base_url_from_value(alias_value)
+                        .or_else(|| provider_summary.base_url.clone()),
+                    default_model: false,
+                    fallback_model: false,
+                    source: "model_aliases".to_string(),
+                },
+            );
+        }
+    }
+}
+
+fn push_configured_model(summary: &mut ModelSummary, model: ConfiguredModelSummary) {
+    if model.source == "model_aliases" {
+        summary.configured_models.push(model);
+        return;
+    }
+    if let Some(existing) = summary
+        .configured_models
+        .iter_mut()
+        .find(|existing| existing.model_id == model.model_id && existing.provider == model.provider)
+    {
+        existing.default_model |= model.default_model;
+        existing.fallback_model |= model.fallback_model;
+        if existing.base_url.is_none() {
+            existing.base_url = model.base_url;
+        }
+        if existing.name == existing.model_id && model.name != model.model_id {
+            existing.name = model.name;
+        }
+    } else {
+        summary.configured_models.push(model);
+    }
+}
+
+fn base_url_from_value(value: &Value) -> Option<String> {
+    string_at(value, &["base_url"])
+        .or_else(|| string_at(value, &["baseURL"]))
+        .or_else(|| string_at(value, &["baseUrl"]))
+        .or_else(|| string_at(value, &["endpoint"]))
+        .map(str::to_string)
 }
 
 fn string_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {

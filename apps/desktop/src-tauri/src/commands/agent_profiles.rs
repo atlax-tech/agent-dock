@@ -546,7 +546,7 @@ mod tests {
         let agent = temp.path().join("home/.openclaw/agents/config-metadata");
         write_config(
             agent.join("config.json"),
-            r#"{"name":"Config Metadata","provider":"openai","model":{"default":"gpt-safe"}}"#,
+            r#"{"name":"Config Metadata","provider":"openai","model":{"default":"gpt-safe","baseURL":"http://localhost:7777/v1"}}"#,
         );
         write_config(
             agent.join("auth.json"),
@@ -573,7 +573,80 @@ mod tests {
                 && file.sensitive
                 && file.skipped
         }));
+        assert_eq!(
+            agent
+                .provider_summary
+                .as_ref()
+                .and_then(|summary| summary.base_url.as_deref()),
+            Some("http://localhost:7777/v1")
+        );
         assert!(!rendered.contains("AUTH_METADATA_CANARY_012"));
+    }
+
+    #[test]
+    fn hermes_profile_scans_fallback_providers_and_model_aliases() {
+        let temp = tempfile::tempdir().expect("temp home");
+        let profile = temp.path().join("home/.hermes/profiles/companion-agent");
+        write_config(
+            profile.join("config.yaml"),
+            r#"
+model:
+  provider: lmstudio
+  default: qwen3.5-9b-uncensored-hauhaucs-aggressive
+fallback_providers:
+  - provider: lmstudio
+    model: qwen3.6-27b-aeon-ultimate-uncensored-i1
+model_aliases:
+  qwen9b:
+    provider: lmstudio
+    model: qwen3.5-9b-uncensored-hauhaucs-aggressive
+  qwen27b:
+    provider: lmstudio
+    model: qwen3.6-27b-aeon-ultimate-uncensored-i1
+"#,
+        );
+
+        let agents = scan_managed_agents_with_options(&ScanOptions {
+            home_dir: temp.path().join("home"),
+            hermes_home: None,
+        })
+        .expect("scan");
+        let agent = agents
+            .iter()
+            .find(|agent| agent.display_name == "companion-agent")
+            .expect("managed agent");
+        let models = &agent
+            .model_summary
+            .as_ref()
+            .expect("model summary")
+            .configured_models;
+
+        assert_eq!(
+            agent
+                .model_summary
+                .as_ref()
+                .and_then(|summary| summary.default_model.as_deref()),
+            Some("qwen3.5-9b-uncensored-hauhaucs-aggressive")
+        );
+        assert_eq!(
+            agent
+                .model_summary
+                .as_ref()
+                .and_then(|summary| summary.fallback_model.as_deref()),
+            Some("qwen3.6-27b-aeon-ultimate-uncensored-i1")
+        );
+        assert!(models
+            .iter()
+            .any(|model| model.default_model && model.source == "model.default"));
+        assert!(models
+            .iter()
+            .any(|model| model.fallback_model && model.source == "fallback_providers"));
+        assert!(models
+            .iter()
+            .any(|model| model.name == "qwen9b" && model.source == "model_aliases"));
+        assert!(models
+            .iter()
+            .any(|model| model.name == "qwen27b" && model.source == "model_aliases"));
     }
 
     fn write_config(path: PathBuf, content: &str) {

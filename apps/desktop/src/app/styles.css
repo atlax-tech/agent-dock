@@ -698,6 +698,510 @@ button {
   word-break: break-all;
 }
 
+.providerManagerPanel {
+  display: grid;
+  gap: 14px;
+}
+
+.configuredModelPanel,
+.addModelPanel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.configuredModelList {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+}
+
+.configuredModelRow {
+  display: grid;
+  grid-template-columns:
+    minmax(140px, 1fr) minmax(140px, 1fr) minmax(120px, 0.9fr)
+    minmax(180px, 1.2fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 11px 12px;
+  border-bottom: 1px solid #edf1ef;
+  color: #233339;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.configuredModelRow:last-child {
+  border-bottom: 0;
+}
+
+.configuredModelRow:hover {
+  background: #f4f8f6;
+}
+
+.configuredModelRow > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.configuredModelRow strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #172026;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.configuredModelRow small {
+  color: #66736d;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.modelRoleBadge {
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #66736d;
+  background: #f1f5f3;
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.modelRoleBadgeActive {
+  color: #174f42;
+  background: #e3f1ec;
+}
+
+.providerPresetGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.providerPresetGridCompact {
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+}
+
+.providerPreset {
+  display: grid;
+  gap: 4px;
+  min-height: 72px;
+  padding: 10px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  color: #31423c;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.providerPreset strong {
+  font-size: 13px;
+}
+
+.providerPreset span {
+  color: #64736d;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.providerPresetActive {
+  border-color: #174f42;
+  background: #e8f5ee;
+}
+
+.providerFormGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.providerFormGrid label {
+  display: grid;
+  gap: 6px;
+  color: #41504a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.providerFormGrid input {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #cfd8d4;
+  border-radius: 6px;
+  color: #17252b;
+  background: #ffffff;
+  font: inherit;
+}
+
+.providerActionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.providerProfileManager {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.sectionTitleRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sectionTitleRow h4 {
+  margin: 0;
+  color: #233339;
+  font-size: 15px;
+}
+
+.sectionTitleRow span {
+  color: #66736d;
+  font-size: 12px;
+}
+
+.providerProfileList {
+  display: grid;
+  gap: 8px;
+}
+
+.providerProfileRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.providerProfileRow > button {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 0;
+  color: #233339;
+  background: transparent;
+  text-align: left;
+}
+
+.providerProfileRow span {
+  overflow: hidden;
+  color: #66736d;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providerProfileRow div {
+  display: flex;
+  gap: 5px;
+}
+
+.providerProfileRow div button {
+  min-width: 30px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: #40504a;
+  background: #e8f0ec;
+  font-size: 12px;
+}
+
+.providerProfileRow div button:disabled {
+  color: #9aa5a0;
+  cursor: not-allowed;
+}
+
+.providerProfileManager textarea {
+  min-height: 110px;
+  padding: 10px;
+  border: 1px solid #cfd8d4;
+  border-radius: 8px;
+  color: #17252b;
+  background: #f8fbfa;
+  font: inherit;
+  font-size: 12px;
+}
+
+.profilePurposeNote {
+  padding: 10px 12px;
+  border: 1px solid #dce8e3;
+  border-radius: 8px;
+  color: #31515b;
+  background: #f4f8f6;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.modelDialogBackdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(23 32 38 / 38%);
+}
+
+.modelDialog {
+  display: grid;
+  gap: 14px;
+  width: min(980px, 100%);
+  max-height: min(780px, calc(100vh - 48px));
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid #cfd8d4;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgb(23 32 38 / 24%);
+}
+
+.modelDialogHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modelDialogHeader h4,
+.modelParameterSection h5 {
+  margin: 0;
+  color: #233339;
+}
+
+.dialogCloseButton {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  place-items: center;
+  border-radius: 8px;
+  color: #40504a;
+  background: #edf1ef;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.modelDialogForm,
+.modelParameterGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.modelDialogForm label,
+.modelParameterGrid label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: #41504a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.modelDialogForm input,
+.modelParameterGrid input,
+.modelParameterGrid select {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #cfd8d4;
+  border-radius: 6px;
+  color: #17252b;
+  background: #ffffff;
+  font: inherit;
+}
+
+.apiKeyInputField small {
+  color: #66736d;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.apiKeyInputWrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  align-items: center;
+  border: 1px solid #cfd8d4;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.apiKeyInputWrap input {
+  border: 0;
+}
+
+.eyeIconButton {
+  display: inline-grid;
+  height: 38px;
+  padding: 0;
+  place-items: center;
+  border-left: 1px solid #edf1ef;
+  color: #31515b;
+  background: transparent;
+  cursor: pointer;
+}
+
+.eyeIconButton svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.modelRoleToggles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-column: 1 / -1;
+  gap: 10px;
+}
+
+.modelRoleToggles label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.modelParameterSection {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid #edf1ef;
+}
+
+.modelParameterSection > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.modelParameterSection > div:first-child span {
+  color: #66736d;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.modelDialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.effectiveModelPreview,
+.providerValidationReport,
+.providerPlanPreview {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.effectiveModelPreview h4,
+.providerValidationReport h4,
+.providerPlanPreview h4 {
+  margin: 0;
+  color: #233339;
+  font-size: 15px;
+}
+
+.effectiveModelPreview > strong {
+  color: #174f42;
+  font-size: 18px;
+}
+
+.effectiveModelPreview > span {
+  color: #485852;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.effectiveSteps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.effectiveStep {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.effectiveStepActive {
+  border-color: #174f42;
+  background: #e8f5ee;
+}
+
+.effectiveStep span,
+.effectiveStep small {
+  color: #5b6b65;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.modelChipList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.modelChipList span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #174f42;
+  background: #e8f5ee;
+  font-size: 12px;
+}
+
+.emptyInlineNote {
+  color: #66736d;
+  font-size: 13px;
+}
+
+.diffPreview {
+  overflow: auto;
+  max-height: 260px;
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  color: #233339;
+  background: #f4f8f6;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .operationPane {
   display: flex;
   flex-direction: column;
@@ -1394,7 +1898,21 @@ button {
   .paneMeta,
   .safetyList,
   .policyGrid,
-  .settingsModule {
+  .settingsModule,
+  .providerFormGrid,
+  .effectiveSteps,
+  .modelDialogForm,
+  .modelParameterGrid,
+  .modelRoleToggles {
+    grid-template-columns: 1fr;
+  }
+
+  .providerPresetGrid,
+  .providerPresetGridCompact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .configuredModelRow {
     grid-template-columns: 1fr;
   }
 
@@ -1422,6 +1940,17 @@ button {
   }
 }
 
+@media (min-width: 961px) and (max-width: 1280px) {
+  .providerPresetGrid,
+  .providerPresetGridCompact {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .operationTitleRow {
+    flex-wrap: wrap;
+  }
+}
+
 @media (max-width: 760px) {
   .appShell {
     grid-template-columns: 1fr;
@@ -1444,5 +1973,23 @@ button {
   .dashboardToolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .providerPresetGrid,
+  .providerPresetGridCompact {
+    grid-template-columns: 1fr;
+  }
+
+  .modelDialogBackdrop {
+    padding: 12px;
+  }
+
+  .modelDialog {
+    max-height: calc(100vh - 24px);
+    padding: 14px;
+  }
+
+  .modelDialogActions {
+    flex-direction: column-reverse;
   }
 }

@@ -184,7 +184,17 @@ fn merge_metadata(
         .base_url
         .clone()
         .or_else(|| string_at(value, &["base_url"]).map(str::to_string))
-        .or_else(|| string_at(value, &["provider", "base_url"]).map(str::to_string));
+        .or_else(|| string_at(value, &["baseURL"]).map(str::to_string))
+        .or_else(|| string_at(value, &["baseUrl"]).map(str::to_string))
+        .or_else(|| string_at(value, &["endpoint"]).map(str::to_string))
+        .or_else(|| string_at(value, &["provider", "base_url"]).map(str::to_string))
+        .or_else(|| string_at(value, &["provider", "baseURL"]).map(str::to_string))
+        .or_else(|| string_at(value, &["provider", "baseUrl"]).map(str::to_string))
+        .or_else(|| string_at(value, &["provider", "endpoint"]).map(str::to_string))
+        .or_else(|| string_at(value, &["model", "base_url"]).map(str::to_string))
+        .or_else(|| string_at(value, &["model", "baseURL"]).map(str::to_string))
+        .or_else(|| string_at(value, &["model", "baseUrl"]).map(str::to_string))
+        .or_else(|| string_at(value, &["model", "endpoint"]).map(str::to_string));
     model_summary.default_model = model_summary
         .default_model
         .clone()
@@ -195,6 +205,7 @@ fn merge_metadata(
         .clone()
         .or_else(|| string_at(value, &["fallback_model"]).map(str::to_string))
         .or_else(|| string_at(value, &["model", "fallback"]).map(str::to_string));
+    collect_openclaw_configured_models(provider_summary, model_summary);
 
     provider_summary
         .secret_fields
@@ -203,6 +214,56 @@ fn merge_metadata(
     provider_summary.secret_fields.dedup();
 
     collect_channel_hints(value, channel_summary);
+}
+
+fn collect_openclaw_configured_models(
+    provider_summary: &ProviderSummary,
+    model_summary: &mut ModelSummary,
+) {
+    if let Some(model_id) = model_summary.default_model.clone() {
+        push_configured_model(
+            model_summary,
+            ConfiguredModelSummary {
+                name: model_id.clone(),
+                model_id,
+                provider: provider_summary.provider.clone(),
+                base_url: provider_summary.base_url.clone(),
+                default_model: true,
+                fallback_model: false,
+                source: "default_model".to_string(),
+            },
+        );
+    }
+    if let Some(model_id) = model_summary.fallback_model.clone() {
+        push_configured_model(
+            model_summary,
+            ConfiguredModelSummary {
+                name: model_id.clone(),
+                model_id,
+                provider: provider_summary.provider.clone(),
+                base_url: provider_summary.base_url.clone(),
+                default_model: false,
+                fallback_model: true,
+                source: "fallback_model".to_string(),
+            },
+        );
+    }
+}
+
+fn push_configured_model(summary: &mut ModelSummary, model: ConfiguredModelSummary) {
+    if let Some(existing) = summary
+        .configured_models
+        .iter_mut()
+        .find(|existing| existing.model_id == model.model_id && existing.provider == model.provider)
+    {
+        existing.default_model |= model.default_model;
+        existing.fallback_model |= model.fallback_model;
+        if existing.base_url.is_none() {
+            existing.base_url = model.base_url;
+        }
+    } else {
+        summary.configured_models.push(model);
+    }
 }
 
 fn string_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {

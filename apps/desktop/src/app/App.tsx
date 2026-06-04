@@ -6,6 +6,7 @@ type RuntimeProduct = "openclaw" | "hermes";
 type ThemeMode = "light" | "dark";
 type LanguageMode = "zh" | "en";
 type DetectionConfidence = "unknown" | "low" | "medium" | "high";
+type ProviderKind = "openai-compatible" | "ollama" | "lmstudio" | "comfyui" | "custom";
 
 type OperationNode =
   | "basic"
@@ -63,6 +64,15 @@ type ProviderSummary = {
 type ModelSummary = {
   defaultModel?: string | null;
   fallbackModel?: string | null;
+  configuredModels?: {
+    modelId: string;
+    name: string;
+    provider?: string | null;
+    baseUrl?: string | null;
+    defaultModel: boolean;
+    fallbackModel: boolean;
+    source: string;
+  }[];
 };
 
 type ConfigFileEntry = {
@@ -155,6 +165,164 @@ type LifecycleResult = {
   runtime: RuntimeProduct;
   targetPath: string;
   backupPath?: string | null;
+};
+
+type EffectiveModelStep = {
+  label: string;
+  model?: string | null;
+  active: boolean;
+  reason: string;
+  localOnly: boolean;
+  mayCallRemoteApi: boolean;
+  mayCreateCost: boolean;
+};
+
+type EffectiveModelPreview = {
+  effectiveModel?: string | null;
+  source: string;
+  explanation: string;
+  localOnly: boolean;
+  mayCallRemoteApi: boolean;
+  mayCreateCost: boolean;
+  steps: EffectiveModelStep[];
+  warnings: string[];
+};
+
+type ModelProviderUpdateRequest = {
+  agentId: string;
+  providerId?: string | null;
+  providerName?: string | null;
+  kind: ProviderKind;
+  baseUrl?: string | null;
+  apiKeyRef?: string | null;
+  defaultModel?: string | null;
+  fallbackModel?: string | null;
+  contextLength?: string | null;
+  maxTokens?: string | null;
+  timeoutSeconds?: string | null;
+  thinking?: string | null;
+  reasoning?: string | null;
+};
+
+type ProviderProfile = {
+  id: string;
+  name: string;
+  kind: ProviderKind;
+  baseUrl?: string | null;
+  apiKeyRef?: string | null;
+  defaultModel?: string | null;
+  fallbackModel?: string | null;
+  validationJson: string;
+  updatedAt: string;
+  sortIndex?: number | null;
+};
+
+type ModelProviderUpdatePlan = {
+  agentId: string;
+  runtime: RuntimeProduct;
+  targetFiles: string[];
+  oldHash: string;
+  newHash: string;
+  unifiedDiff: string;
+  warnings: string[];
+  backupWillBeCreated: boolean;
+  affectsOnlySelectedAgentProfile: boolean;
+  effectiveModelBefore: EffectiveModelPreview;
+  effectiveModelAfter: EffectiveModelPreview;
+};
+
+type ModelProviderUpdateResult = {
+  agentId: string;
+  runtime: RuntimeProduct;
+  targetPath: string;
+  backupPath: string;
+  oldHash: string;
+  newHash: string;
+};
+
+type ProviderValidationReport = {
+  baseUrlValid: boolean;
+  apiKeyReferenceStatus: string;
+  connectionStatus: string;
+  authStatus: string;
+  modelListStatus: string;
+  generationStatus: string;
+  models: string[];
+  warnings: string[];
+};
+
+type LocalRuntimeScanResult = {
+  runtime: string;
+  endpoint?: string | null;
+  reachable: boolean;
+  models: { name: string; modified?: string | null; size?: number | null }[];
+  warnings: string[];
+};
+
+type ModelParameterForm = {
+  contextLength: string;
+  maxTokens: string;
+  timeoutSeconds: string;
+  thinking: string;
+  reasoning: string;
+};
+
+type ConfiguredModelRole = "default" | "fallback";
+
+type ConfiguredModel = {
+  id: string;
+  name: string;
+  role: ConfiguredModelRole;
+  providerName?: string | null;
+  baseUrl?: string | null;
+  apiKeyRef?: string | null;
+  defaultModel: boolean;
+  fallbackModel: boolean;
+  source: string;
+  warnings: string[];
+};
+
+type ProviderModelDialogMode = "detail" | "add";
+
+type ProviderModelDialogState = {
+  mode: ProviderModelDialogMode;
+  modelId: string;
+  modelName: string;
+  providerName: string;
+  baseUrl: string;
+  apiKeyRef: string;
+  defaultModel: boolean;
+  fallbackModel: boolean;
+};
+
+type AgentProviderModel = {
+  modelId: string;
+  name: string;
+  providerName?: string | null;
+  baseUrl?: string | null;
+  apiKeyRef?: string | null;
+  defaultModel: boolean;
+  fallbackModel: boolean;
+  source: string;
+  warnings: string[];
+};
+
+type AgentModelProvidersResponse = {
+  agentId: string;
+  runtime: RuntimeProduct;
+  source: string;
+  models: AgentProviderModel[];
+  warnings: string[];
+};
+
+type ComfyScanResult = {
+  providerKind: string;
+  isChatLlmProvider: boolean;
+  detectedPaths: string[];
+  capabilityFolders: { kind: string; path: string; models: string[] }[];
+  endpoint?: string | null;
+  endpointReachable: boolean;
+  warnings: string[];
 };
 
 type AgentScanSource = "desktop" | "fixture" | "empty";
@@ -274,6 +442,14 @@ const settingsModules = [
 ];
 
 const settingsFooterLinks = ["GitHub", "Buy me a coffee", "Version", "Updates", "Privacy"];
+
+const providerKindOptions: { id: ProviderKind; label: string; detail: string }[] = [
+  { id: "openai-compatible", label: "OpenAI-compatible", detail: "/v1/models 与 chat completions" },
+  { id: "ollama", label: "Ollama", detail: "本地 http://localhost:11434" },
+  { id: "lmstudio", label: "LM Studio", detail: "本地 OpenAI-compatible server" },
+  { id: "comfyui", label: "ComfyUI", detail: "本地能力 provider，不作为默认 chat LLM" },
+  { id: "custom", label: "Custom", detail: "自定义 OpenAI-compatible provider" },
+];
 
 export function App() {
   const [activeRoute, setActiveRoute] = useState<DockRoute>("dashboard");
@@ -767,6 +943,11 @@ export function App() {
     setCopyError("");
   }
 
+  function refreshAfterMutation() {
+    setRescanRequestId((current) => current + 1);
+    setRuntimeDetectionRequestId((current) => current + 1);
+  }
+
   function applyDeleteAgentPlan(plan: DeleteAgentMutationPlan) {
     if (!hasTauriCommandBridge()) {
       setDeleteAgentApplyState("error");
@@ -955,6 +1136,7 @@ export function App() {
             onRequestCopyLifecyclePlan={requestCopyLifecyclePlan}
             onApplyCopyLifecyclePlan={applyCopyLifecyclePlan}
             onDismissCopyLifecyclePlan={dismissCopyLifecyclePlan}
+            onRefreshAfterMutation={refreshAfterMutation}
             setExpandedItem={setExpandedItem}
             setSelectedItem={setSelectedItem}
             setSelectedOperation={setSelectedOperation}
@@ -1029,6 +1211,7 @@ function DashboardView({
   onRequestCopyLifecyclePlan,
   onApplyCopyLifecyclePlan,
   onDismissCopyLifecyclePlan,
+  onRefreshAfterMutation,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -1094,6 +1277,7 @@ function DashboardView({
   onRequestCopyLifecyclePlan: (agent: ManagedAgent) => void;
   onApplyCopyLifecyclePlan: (plan: LifecyclePlan) => void;
   onDismissCopyLifecyclePlan: () => void;
+  onRefreshAfterMutation: () => void;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -1197,6 +1381,7 @@ function DashboardView({
           onRequestCopyLifecyclePlan={onRequestCopyLifecyclePlan}
           onApplyCopyLifecyclePlan={onApplyCopyLifecyclePlan}
           onDismissCopyLifecyclePlan={onDismissCopyLifecyclePlan}
+          onRefreshAfterMutation={onRefreshAfterMutation}
         />
       ) : (
         <NotInstalledDashboard runtime={runtime} />
@@ -1281,6 +1466,7 @@ function InstalledDashboard({
   onRequestCopyLifecyclePlan,
   onApplyCopyLifecyclePlan,
   onDismissCopyLifecyclePlan,
+  onRefreshAfterMutation,
   setExpandedItem,
   setSelectedItem,
   setSelectedOperation,
@@ -1340,6 +1526,7 @@ function InstalledDashboard({
   onRequestCopyLifecyclePlan: (agent: ManagedAgent) => void;
   onApplyCopyLifecyclePlan: (plan: LifecyclePlan) => void;
   onDismissCopyLifecyclePlan: () => void;
+  onRefreshAfterMutation: () => void;
   setExpandedItem: (item: string) => void;
   setSelectedItem: (item: string) => void;
   setSelectedOperation: (operation: OperationNode) => void;
@@ -1516,6 +1703,12 @@ function InstalledDashboard({
               onApplyCopyLifecyclePlan={onApplyCopyLifecyclePlan}
               onDismissCopyLifecyclePlan={onDismissCopyLifecyclePlan}
             />
+          ) : selectedOperation === "provider" ? (
+            <ProviderModelPane
+              selectedAgent={selectedAgent}
+              runtime={runtime}
+              onRefreshAfterMutation={onRefreshAfterMutation}
+            />
           ) : (
             <PlaceholderOperationPane
               runtime={runtime}
@@ -1526,6 +1719,1010 @@ function InstalledDashboard({
         </article>
       </section>
     </>
+  );
+}
+
+function ProviderModelPane({
+  selectedAgent,
+  runtime,
+  onRefreshAfterMutation,
+}: {
+  selectedAgent: ManagedAgent | null;
+  runtime: DashboardRuntime;
+  onRefreshAfterMutation: () => void;
+}) {
+  const [kind, setKind] = useState<ProviderKind>("openai-compatible");
+  const [providerName, setProviderName] = useState("OpenAI compatible");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKeyRef, setApiKeyRef] = useState("");
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  const [defaultModel, setDefaultModel] = useState("");
+  const [fallbackModel, setFallbackModel] = useState("");
+  const [modelParams, setModelParams] = useState<ModelParameterForm>({
+    contextLength: "",
+    maxTokens: "",
+    timeoutSeconds: "",
+    thinking: "",
+    reasoning: "",
+  });
+  const [modelDialog, setModelDialog] = useState<ProviderModelDialogState | null>(null);
+  const [effectivePreview, setEffectivePreview] = useState<EffectiveModelPreview | null>(null);
+  const [providerPlan, setProviderPlan] = useState<ModelProviderUpdatePlan | null>(null);
+  const [providerResult, setProviderResult] = useState<ModelProviderUpdateResult | null>(null);
+  const [validationResult, setValidationResult] = useState<
+    ProviderValidationReport | LocalRuntimeScanResult | ComfyScanResult | null
+  >(null);
+  const [providerProfiles, setProviderProfiles] = useState<ProviderProfile[]>([]);
+  const [providerProfileJson, setProviderProfileJson] = useState("");
+  const [modelProviderList, setModelProviderList] = useState<AgentModelProvidersResponse | null>(null);
+  const [modelProviderListState, setModelProviderListState] = useState<"idle" | "loading" | "error">("idle");
+  const [modelProviderListError, setModelProviderListError] = useState("");
+  const [profileListState, setProfileListState] = useState<"idle" | "loading" | "error">("idle");
+  const [providerState, setProviderState] = useState<
+    "idle" | "previewing" | "testing" | "planning" | "applying" | "success" | "error"
+  >("idle");
+  const [providerError, setProviderError] = useState("");
+
+  useEffect(() => {
+    setKind(inferProviderKind(selectedAgent?.providerSummary?.provider));
+    setProviderName(selectedAgent?.providerSummary?.provider ?? "OpenAI compatible");
+    setBaseUrl(selectedAgent?.providerSummary?.baseUrl ?? "");
+    setApiKeyRef("");
+    setApiKeyVisible(false);
+    setDefaultModel(selectedAgent?.modelSummary?.defaultModel ?? "");
+    setFallbackModel(selectedAgent?.modelSummary?.fallbackModel ?? "");
+    setModelParams({
+      contextLength: "",
+      maxTokens: "",
+      timeoutSeconds: "",
+      thinking: "",
+      reasoning: "",
+    });
+    setModelDialog(null);
+    setEffectivePreview(null);
+    setProviderPlan(null);
+    setProviderResult(null);
+    setValidationResult(null);
+    setModelProviderList(null);
+    setModelProviderListState("idle");
+    setModelProviderListError("");
+    setProviderState("idle");
+    setProviderError("");
+  }, [selectedAgent?.id]);
+
+  useEffect(() => {
+    loadProviderProfiles();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedAgent) {
+      setModelProviderList(null);
+      setModelProviderListState("idle");
+      setModelProviderListError("");
+      return;
+    }
+    loadAgentModelProviders(selectedAgent);
+  }, [selectedAgent?.id]);
+
+  if (!selectedAgent) {
+    return (
+      <div className="emptyDetailState">
+        <strong>未选择 {runtime.entityLabel}</strong>
+        <span>请选择左侧扫描到的 agent/profile 后配置 Provider / Model。</span>
+      </div>
+    );
+  }
+
+  const agent = selectedAgent;
+  const updateRequest = buildModelProviderUpdateRequest(agent.id, {
+      kind,
+      providerName,
+      baseUrl,
+      apiKeyRef,
+      defaultModel,
+      fallbackModel,
+      ...modelParams,
+  });
+  const configuredModels = configuredModelsForAgent(agent, defaultModel, fallbackModel, modelProviderList);
+  const selectedApiKeyRef =
+    apiKeyRef || agent.providerSummary?.secretFields[0] || agent.providerSummary?.missingSecretFields[0] || "";
+
+  function previewEffectiveModel() {
+    if (!hasTauriCommandBridge()) {
+      setProviderState("error");
+      setProviderError("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setProviderState("previewing");
+    setProviderError("");
+    invoke<EffectiveModelPreview>("resolve_effective_model_preview", {
+      request: {
+        agentId: agent.id,
+        provider: providerProfileInput(updateRequest),
+      },
+    })
+      .then((preview) => {
+        setEffectivePreview(preview);
+        setProviderState("idle");
+      })
+      .catch((error: unknown) => {
+        setProviderState("error");
+        setProviderError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function loadProviderProfiles() {
+    if (!hasTauriCommandBridge()) {
+      setProfileListState("error");
+      return;
+    }
+
+    setProfileListState("loading");
+    invoke<ProviderProfile[]>("list_provider_profiles")
+      .then((profiles) => {
+        setProviderProfiles(profiles);
+        setProfileListState("idle");
+      })
+      .catch(() => {
+        setProfileListState("error");
+      });
+  }
+
+  function loadAgentModelProviders(nextAgent: ManagedAgent) {
+    if (!hasTauriCommandBridge()) {
+      setModelProviderList(null);
+      setModelProviderListState("error");
+      setModelProviderListError("Tauri command bridge unavailable; using scanned fixture metadata.");
+      return;
+    }
+
+    setModelProviderListState("loading");
+    setModelProviderListError("");
+    invoke<AgentModelProvidersResponse>("list_agent_model_providers", {
+      request: { agentId: nextAgent.id },
+    })
+      .then((response) => {
+        setModelProviderList(response);
+        setModelProviderListState("idle");
+      })
+      .catch((error: unknown) => {
+        setModelProviderList(null);
+        setModelProviderListState("error");
+        setModelProviderListError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function selectProviderProfile(profile: ProviderProfile) {
+    setKind(profile.kind);
+    setProviderName(profile.name);
+    setBaseUrl(profile.baseUrl ?? "");
+    setApiKeyRef(profile.apiKeyRef ?? "");
+    setDefaultModel(profile.defaultModel ?? "");
+    setFallbackModel(profile.fallbackModel ?? "");
+    setProviderPlan(null);
+    setProviderResult(null);
+    setValidationResult(null);
+  }
+
+  function openConfiguredModel(model: ConfiguredModel) {
+    setModelDialog({
+      mode: "detail",
+      modelId: model.id,
+      modelName: model.name,
+      providerName: model.providerName ?? providerName,
+      baseUrl: model.baseUrl ?? baseUrl,
+      apiKeyRef: model.apiKeyRef ?? selectedApiKeyRef,
+      defaultModel: model.defaultModel,
+      fallbackModel: model.fallbackModel,
+    });
+    setProviderName(model.providerName ?? providerName);
+    setBaseUrl(model.baseUrl ?? baseUrl);
+    setApiKeyRef(model.apiKeyRef ?? apiKeyRef);
+    setProviderPlan(null);
+    setProviderResult(null);
+    setProviderError("");
+  }
+
+  function openAddModelDialog() {
+    setModelDialog({
+      mode: "add",
+      modelId: "",
+      modelName: "",
+      providerName,
+      baseUrl,
+      apiKeyRef: selectedApiKeyRef,
+      defaultModel: configuredModels.length === 0,
+      fallbackModel: configuredModels.length > 0,
+    });
+    setProviderPlan(null);
+    setProviderResult(null);
+    setProviderError("");
+  }
+
+  function updateModelParameter(field: keyof ModelParameterForm, value: string) {
+    setModelParams((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    setProviderPlan(null);
+  }
+
+  function closeModelDialog() {
+    if (providerState === "applying") {
+      return;
+    }
+    setModelDialog(null);
+    setProviderError("");
+  }
+
+  function saveModelDialog() {
+    if (!modelDialog) {
+      return;
+    }
+    const modelId = modelDialog.modelId.trim();
+    if (!modelId) {
+      setProviderState("error");
+      setProviderError("Model ID 不能为空。");
+      return;
+    }
+    if (!modelDialog.defaultModel && !modelDialog.fallbackModel) {
+      setProviderState("error");
+      setProviderError("新增或编辑模型至少需要设置为 Default model 或 Fallback model。");
+      return;
+    }
+    const nextDefaultModel = modelDialog.defaultModel ? modelId : defaultModel;
+    const nextFallbackModel = modelDialog.fallbackModel ? modelId : fallbackModel;
+    setDefaultModel(nextDefaultModel);
+    setFallbackModel(nextFallbackModel);
+    requestProviderPlan({
+      defaultModelOverride: nextDefaultModel,
+      fallbackModelOverride: nextFallbackModel,
+    });
+  }
+
+  function saveProviderProfileOnly() {
+    if (!hasTauriCommandBridge()) {
+      setProviderState("error");
+      setProviderError("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setProviderState("planning");
+    setProviderError("");
+    invoke<ProviderProfile>("save_provider_profile", {
+      input: {
+        ...providerProfileInput(updateRequest),
+        sortIndex: providerProfiles.length,
+      },
+    })
+      .then(() => {
+        setProviderState("idle");
+        loadProviderProfiles();
+      })
+      .catch((error: unknown) => {
+        setProviderState("error");
+        setProviderError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function deleteProviderProfile(id: string) {
+    if (!hasTauriCommandBridge()) {
+      return;
+    }
+
+    invoke<ProviderProfile[]>("delete_provider_profile_command", {
+      request: { id },
+    })
+      .then(setProviderProfiles)
+      .catch((error: unknown) => {
+        setProviderState("error");
+        setProviderError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function moveProviderProfile(id: string, direction: -1 | 1) {
+    const currentIndex = providerProfiles.findIndex((profile) => profile.id === id);
+    const nextIndex = currentIndex + direction;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= providerProfiles.length) {
+      return;
+    }
+    const reordered = [...providerProfiles];
+    const [item] = reordered.splice(currentIndex, 1);
+    reordered.splice(nextIndex, 0, item);
+    setProviderProfiles(reordered);
+    if (!hasTauriCommandBridge()) {
+      return;
+    }
+    invoke<ProviderProfile[]>("update_provider_profile_sort_order_command", {
+      request: { orderedIds: reordered.map((profile) => profile.id) },
+    })
+      .then(setProviderProfiles)
+      .catch((error: unknown) => {
+        setProviderState("error");
+        setProviderError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function exportProviderProfiles() {
+    if (!hasTauriCommandBridge()) {
+      return;
+    }
+    invoke<string>("export_provider_profiles")
+      .then(setProviderProfileJson)
+      .catch((error: unknown) => {
+        setProviderState("error");
+        setProviderError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function importProviderProfiles() {
+    if (!hasTauriCommandBridge() || !providerProfileJson.trim()) {
+      return;
+    }
+    invoke<ProviderProfile[]>("import_provider_profiles", {
+      request: { json: providerProfileJson },
+    })
+      .then((profiles) => {
+        setProviderProfiles(profiles);
+        setProviderProfileJson("");
+      })
+      .catch((error: unknown) => {
+        setProviderState("error");
+        setProviderError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function testProviderConnection() {
+    if (!hasTauriCommandBridge()) {
+      setProviderState("error");
+      setProviderError("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setProviderState("testing");
+    setProviderError("");
+    setValidationResult(null);
+    const cleanBaseUrl = baseUrl.trim();
+    const cleanModel = defaultModel.trim() || fallbackModel.trim() || undefined;
+    const command =
+      kind === "ollama"
+        ? "scan_ollama_runtime"
+        : kind === "lmstudio"
+          ? "scan_lmstudio_runtime"
+          : kind === "comfyui"
+            ? "scan_comfy_runtime"
+            : "validate_openai_provider";
+    const request =
+      kind === "ollama" || kind === "lmstudio" || kind === "comfyui"
+        ? { baseUrl: cleanBaseUrl || undefined, customPath: undefined }
+        : {
+            kind,
+            baseUrl: cleanBaseUrl,
+            apiKeyRef: apiKeyRef.trim() || undefined,
+            model: cleanModel,
+            includeTestRequest: Boolean(cleanModel),
+          };
+    invoke<ProviderValidationReport | LocalRuntimeScanResult | ComfyScanResult>(command, { request })
+      .then((report) => {
+        setValidationResult(report);
+        setProviderState("idle");
+      })
+      .catch((error: unknown) => {
+        setProviderState("error");
+        setProviderError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function requestProviderPlan(
+    overrides: {
+      defaultModelOverride?: string;
+      fallbackModelOverride?: string;
+    } = {},
+  ) {
+    if (!hasTauriCommandBridge()) {
+      setProviderState("error");
+      setProviderError("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setProviderState("planning");
+    setProviderError("");
+    setProviderResult(null);
+    const nextRequest = buildModelProviderUpdateRequest(agent.id, {
+      kind,
+      providerName,
+      baseUrl,
+      apiKeyRef,
+      defaultModel: overrides.defaultModelOverride ?? defaultModel,
+      fallbackModel: overrides.fallbackModelOverride ?? fallbackModel,
+      ...modelParams,
+    });
+    invoke<ModelProviderUpdatePlan>("create_model_provider_update_plan", {
+      request: nextRequest,
+    })
+      .then((plan) => {
+        setProviderPlan(plan);
+        setEffectivePreview(plan.effectiveModelAfter);
+        setProviderState("idle");
+      })
+      .catch((error: unknown) => {
+        setProviderState("error");
+        setProviderError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  function applyProviderPlan(plan: ModelProviderUpdatePlan) {
+    if (!hasTauriCommandBridge()) {
+      setProviderState("error");
+      setProviderError("Tauri command bridge unavailable.");
+      return;
+    }
+
+    setProviderState("applying");
+    setProviderError("");
+    invoke<ModelProviderUpdateResult>("apply_model_provider_update", {
+      request: {
+        update: updateRequest,
+        expectedHash: plan.oldHash,
+      },
+    })
+      .then((result) => {
+        setProviderResult(result);
+        setProviderState("success");
+        onRefreshAfterMutation();
+      })
+      .catch((error: unknown) => {
+        setProviderState("error");
+        setProviderError(error instanceof Error ? error.message : String(error));
+      });
+  }
+
+  return (
+    <>
+      <div className="operationTitleRow">
+        <div>
+          <p className="eyebrow">Provider / Model</p>
+          <h3>{agent.displayName}</h3>
+        </div>
+        <div className="operationTitleActions">
+          <button className="secondaryButton compactActionButton" type="button" onClick={openAddModelDialog}>
+            + 添加新模型
+          </button>
+        </div>
+      </div>
+
+      <section className="providerManagerPanel" aria-label="Provider and model manager">
+        <section className="configuredModelPanel" aria-label="Configured models">
+          <div className="sectionTitleRow">
+            <div>
+              <h4>已配置模型列表</h4>
+              <span>
+                {modelProviderListState === "loading"
+                  ? "正在调用 runtime 只读模型/provider 列表..."
+                  : `来源：${modelProviderList?.source ?? "扫描到的 agent/profile 配置元数据"}`}
+              </span>
+            </div>
+            <button className="secondaryButton compactActionButton" type="button" onClick={previewEffectiveModel}>
+              {providerState === "previewing" ? "解析中..." : "预览 effective model"}
+            </button>
+          </div>
+          {modelProviderListState === "error" && configuredModels.length === 0 ? (
+            <div className="warningList">
+              <span>{modelProviderListError}</span>
+            </div>
+          ) : null}
+          {modelProviderList?.warnings.length ? (
+            <div className="warningList">
+              {modelProviderList.warnings.map((warning) => (
+                <span key={warning}>{warning}</span>
+              ))}
+            </div>
+          ) : null}
+          {configuredModels.length === 0 ? (
+            <div className="emptyDetailState">
+              <strong>未扫描到已配置模型</strong>
+              <span>OpenClaw/Hermes 只读命令/API 和本地配置扫描都没有返回可展示的模型。</span>
+            </div>
+          ) : (
+            <div className="configuredModelList">
+              {configuredModels.map((model, index) => (
+                <button className="configuredModelRow" type="button" key={`${model.id}:${index}`} onClick={() => openConfiguredModel(model)}>
+                  <span>
+                    <strong>{model.id}</strong>
+                    <small>Model ID</small>
+                  </span>
+                  <span>
+                    <strong>{model.name}</strong>
+                    <small>Name</small>
+                  </span>
+                  <span>
+                    <strong>{model.providerName ?? "未扫描"}</strong>
+                    <small>Provider</small>
+                  </span>
+                  <span>
+                    <strong>{model.baseUrl ?? "未扫描"}</strong>
+                    <small>Base URL / Endpoint</small>
+                  </span>
+                  <span className={model.defaultModel ? "modelRoleBadge modelRoleBadgeActive" : "modelRoleBadge"}>
+                    Default {model.defaultModel ? "true" : "false"}
+                  </span>
+                  <span className={model.fallbackModel ? "modelRoleBadge modelRoleBadgeActive" : "modelRoleBadge"}>
+                    Fallback {model.fallbackModel ? "true" : "false"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          {effectivePreview ? <EffectiveModelPreviewView preview={effectivePreview} /> : null}
+        </section>
+
+        <section className="providerProfileManager" aria-label="Provider profile manager">
+          <div className="sectionTitleRow">
+            <div>
+              <h4>Provider Profile 区域</h4>
+              <span>
+                Provider Profile 是可复用的 provider endpoint / model 元数据，不等同于当前 Agent/Profile
+                已生效配置。
+              </span>
+            </div>
+            <button className="secondaryButton compactActionButton" type="button" onClick={exportProviderProfiles}>
+              导出
+            </button>
+          </div>
+          <div className="profilePurposeNote">
+            {profileListState === "loading"
+              ? "加载中..."
+              : "选择 profile 只会回填表单；写入当前 Agent/Profile 仍需生成更新计划并确认应用。"}
+          </div>
+          <div className="providerProfileList">
+            {providerProfiles.length === 0 ? (
+              <span className="emptyInlineNote">尚未保存 Provider Profile。</span>
+            ) : (
+              providerProfiles.map((profile, index) => (
+                <div className="providerProfileRow" key={profile.id}>
+                  <button type="button" onClick={() => selectProviderProfile(profile)}>
+                    <strong>{profile.name}</strong>
+                    <span>{profile.kind} · {profile.defaultModel ?? "no model"}</span>
+                  </button>
+                  <div>
+                    <button type="button" disabled={index === 0} onClick={() => moveProviderProfile(profile.id, -1)}>
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      disabled={index === providerProfiles.length - 1}
+                      onClick={() => moveProviderProfile(profile.id, 1)}
+                    >
+                      ↓
+                    </button>
+                    <button type="button" onClick={() => deleteProviderProfile(profile.id)}>
+                      删除
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <textarea
+            value={providerProfileJson}
+            onChange={(event) => setProviderProfileJson(event.target.value)}
+            placeholder="导出 JSON 会显示在这里；也可以粘贴 AgentDock providerProfiles.v1 JSON 后导入。"
+          />
+          <button className="secondaryButton compactActionButton" type="button" onClick={importProviderProfiles}>
+            导入 JSON
+          </button>
+        </section>
+
+        {providerPlan ? (
+          <section className="providerPlanPreview" aria-label="Provider model update plan preview">
+            <h4>Provider / Model 更新计划</h4>
+            <dl className="detailGrid">
+              <DetailItem label="目标文件" value={providerPlan.targetFiles.join(", ")} />
+              <DetailItem label="旧 hash" value={providerPlan.oldHash} />
+              <DetailItem label="新 hash" value={providerPlan.newHash} />
+              <DetailItem label="仅影响当前 Agent/Profile" value={providerPlan.affectsOnlySelectedAgentProfile ? "是" : "否"} />
+            </dl>
+            {providerPlan.warnings.length > 0 ? (
+              <div className="warningList">
+                {providerPlan.warnings.map((warning) => (
+                  <span key={warning}>{warning}</span>
+                ))}
+              </div>
+            ) : null}
+            <pre className="diffPreview">{providerPlan.unifiedDiff}</pre>
+            {providerResult ? (
+              <div className="previewSuccess">
+                <strong>Provider / Model 已更新</strong>
+                <span>备份路径：{providerResult.backupPath}</span>
+              </div>
+            ) : null}
+            {providerState === "error" ? (
+              <div className="previewError">
+                <strong>Provider / Model 更新失败</strong>
+                <span>{providerError}</span>
+              </div>
+            ) : null}
+            <button
+              className="previewConfirmButton"
+              type="button"
+              disabled={
+                providerState === "applying" ||
+                providerState === "success" ||
+                !providerPlan.affectsOnlySelectedAgentProfile ||
+                !providerPlan.backupWillBeCreated
+              }
+              onClick={() => applyProviderPlan(providerPlan)}
+            >
+              {providerState === "applying" ? "写入中..." : "确认应用 Provider / Model 更新"}
+            </button>
+          </section>
+        ) : null}
+        {providerState === "error" && !providerPlan ? (
+          <div className="previewError">
+            <strong>Provider 操作失败</strong>
+            <span>{providerError}</span>
+          </div>
+        ) : null}
+        {modelDialog ? (
+          <ProviderModelDialog
+            apiKeyRef={selectedApiKeyRef}
+            apiKeyVisible={apiKeyVisible}
+            baseUrl={baseUrl}
+            dialog={modelDialog}
+            kind={kind}
+            modelParams={modelParams}
+            providerName={providerName}
+            providerState={providerState}
+            onApiKeyRefChange={(value) => {
+              setApiKeyRef(value);
+              setProviderPlan(null);
+            }}
+            onApiKeyVisibleChange={setApiKeyVisible}
+            onBaseUrlChange={(value) => {
+              setBaseUrl(value);
+              setProviderPlan(null);
+            }}
+            onClose={closeModelDialog}
+            onDialogChange={setModelDialog}
+            onKindChange={(nextKind) => {
+              setKind(nextKind);
+              setProviderName(providerKindOptions.find((option) => option.id === nextKind)?.label ?? nextKind);
+              setBaseUrl(defaultProviderBaseUrl(nextKind));
+              setProviderPlan(null);
+            }}
+            onModelParamChange={updateModelParameter}
+            onProviderNameChange={(value) => {
+              setProviderName(value);
+              setProviderPlan(null);
+            }}
+            onSave={saveModelDialog}
+          />
+        ) : null}
+      </section>
+    </>
+  );
+}
+
+function ProviderModelDialog({
+  apiKeyRef,
+  apiKeyVisible,
+  baseUrl,
+  dialog,
+  kind,
+  modelParams,
+  providerName,
+  providerState,
+  onApiKeyRefChange,
+  onApiKeyVisibleChange,
+  onBaseUrlChange,
+  onClose,
+  onDialogChange,
+  onKindChange,
+  onModelParamChange,
+  onProviderNameChange,
+  onSave,
+}: {
+  apiKeyRef: string;
+  apiKeyVisible: boolean;
+  baseUrl: string;
+  dialog: ProviderModelDialogState;
+  kind: ProviderKind;
+  modelParams: ModelParameterForm;
+  providerName: string;
+  providerState: "idle" | "previewing" | "testing" | "planning" | "applying" | "success" | "error";
+  onApiKeyRefChange: (value: string) => void;
+  onApiKeyVisibleChange: (visible: boolean) => void;
+  onBaseUrlChange: (value: string) => void;
+  onClose: () => void;
+  onDialogChange: (dialog: ProviderModelDialogState) => void;
+  onKindChange: (kind: ProviderKind) => void;
+  onModelParamChange: (field: keyof ModelParameterForm, value: string) => void;
+  onProviderNameChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  const title = dialog.mode === "add" ? "添加新模型" : "模型详情";
+
+  return (
+    <div className="modelDialogBackdrop" role="presentation">
+      <section className="modelDialog" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modelDialogHeader">
+          <div>
+            <p className="eyebrow">{dialog.mode === "add" ? "Add Model" : "Configured Model"}</p>
+            <h4>{title}</h4>
+          </div>
+          <button className="dialogCloseButton" type="button" aria-label="关闭" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        {dialog.mode === "add" ? (
+          <div className="providerPresetGrid providerPresetGridCompact" aria-label="Provider kind">
+            {providerKindOptions.map((option) => (
+              <button
+                className={kind === option.id ? "providerPreset providerPresetActive" : "providerPreset"}
+                key={option.id}
+                type="button"
+                onClick={() => onKindChange(option.id)}
+              >
+                <strong>{option.label}</strong>
+                <span>{option.detail}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="profilePurposeNote">
+            已配置模型详情只展示该模型当前扫描到的 provider 信息；如需新增不同 provider，请使用右上角“添加新模型”。
+          </div>
+        )}
+
+        <div className="modelDialogForm">
+          <label>
+            <span>模型 ID</span>
+            <input
+              value={dialog.modelId}
+              onChange={(event) =>
+                onDialogChange({
+                  ...dialog,
+                  modelId: event.target.value,
+                })
+              }
+              placeholder="gpt-4.1-mini"
+            />
+          </label>
+          <label>
+            <span>模型 Name</span>
+            <input
+              value={dialog.modelName}
+              onChange={(event) =>
+                onDialogChange({
+                  ...dialog,
+                  modelName: event.target.value,
+                })
+              }
+              placeholder="可读名称，默认使用模型 ID"
+            />
+          </label>
+          <label>
+            <span>Provider Name</span>
+            <input
+              value={providerName}
+              readOnly={dialog.mode === "detail"}
+              onChange={(event) => onProviderNameChange(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Base URL / Endpoint</span>
+            <input
+              value={baseUrl}
+              readOnly={dialog.mode === "detail"}
+              onChange={(event) => onBaseUrlChange(event.target.value)}
+            />
+          </label>
+          <label className="apiKeyInputField">
+            <span>API Key</span>
+            <div className="apiKeyInputWrap">
+              <input
+                type={apiKeyVisible ? "text" : "password"}
+                value={apiKeyRef}
+                readOnly={dialog.mode === "detail"}
+                onChange={(event) => onApiKeyRefChange(event.target.value)}
+                placeholder="OPENAI_API_KEY"
+              />
+              <button
+                className="eyeIconButton"
+                type="button"
+                aria-label={apiKeyVisible ? "隐藏 API Key 引用" : "显示 API Key 引用"}
+                title={apiKeyVisible ? "隐藏 API Key 引用" : "显示 API Key 引用"}
+                onClick={() => onApiKeyVisibleChange(!apiKeyVisible)}
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+            </div>
+            <small>只展示已扫描到的引用名；AgentDock 不读取、不复制、不存储 secret 值。</small>
+          </label>
+          <div className="modelRoleToggles" aria-label="Model roles">
+            <label>
+              <input
+                type="checkbox"
+                checked={dialog.defaultModel}
+                onChange={(event) =>
+                  onDialogChange({
+                    ...dialog,
+                    defaultModel: event.target.checked,
+                  })
+                }
+              />
+              <span>Default model ({dialog.defaultModel ? "true" : "false"})</span>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={dialog.fallbackModel}
+                onChange={(event) =>
+                  onDialogChange({
+                    ...dialog,
+                    fallbackModel: event.target.checked,
+                  })
+                }
+              />
+              <span>Fallback model ({dialog.fallbackModel ? "true" : "false"})</span>
+            </label>
+          </div>
+        </div>
+
+        <section className="modelParameterSection" aria-label="Model parameters">
+          <div>
+            <h5>模型参数</h5>
+            <span>参考 OpenClaw/Hermes provider 文档和 cc-switch 模式；会随本次 provider/model 计划写入。</span>
+          </div>
+          <div className="modelParameterGrid">
+            <label>
+              <span>上下文长度</span>
+              <input
+                inputMode="numeric"
+                value={modelParams.contextLength}
+                onChange={(event) => onModelParamChange("contextLength", event.target.value)}
+                placeholder="例如 128000"
+              />
+            </label>
+            <label>
+              <span>max tokens</span>
+              <input
+                inputMode="numeric"
+                value={modelParams.maxTokens}
+                onChange={(event) => onModelParamChange("maxTokens", event.target.value)}
+                placeholder="例如 8192"
+              />
+            </label>
+            <label>
+              <span>timeout seconds</span>
+              <input
+                inputMode="numeric"
+                value={modelParams.timeoutSeconds}
+                onChange={(event) => onModelParamChange("timeoutSeconds", event.target.value)}
+                placeholder="例如 120"
+              />
+            </label>
+            <label>
+              <span>thinking</span>
+              <select value={modelParams.thinking} onChange={(event) => onModelParamChange("thinking", event.target.value)}>
+                <option value="">未设置</option>
+                <option value="enabled">enabled</option>
+                <option value="disabled">disabled</option>
+                <option value="auto">auto</option>
+              </select>
+            </label>
+            <label>
+              <span>reasoning</span>
+              <select value={modelParams.reasoning} onChange={(event) => onModelParamChange("reasoning", event.target.value)}>
+                <option value="">未设置</option>
+                <option value="enabled">enabled</option>
+                <option value="disabled">disabled</option>
+                <option value="auto">auto</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <div className="modelDialogActions">
+          <button className="previewCancelButton" type="button" onClick={onClose}>
+            取消
+          </button>
+          <button className="previewConfirmButton" type="button" disabled={providerState === "planning"} onClick={onSave}>
+            {providerState === "planning" ? "生成计划中..." : "保存"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function EffectiveModelPreviewView({ preview }: { preview: EffectiveModelPreview }) {
+  return (
+    <section className="effectiveModelPreview" aria-label="Effective model resolution">
+      <h4>Effective model resolution</h4>
+      <strong>{preview.effectiveModel ?? "未配置有效模型"}</strong>
+      <span>{preview.explanation}</span>
+      {preview.warnings.length > 0 ? (
+        <div className="warningList">
+          {preview.warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      ) : null}
+      <div className="effectiveSteps">
+        {preview.steps.map((step) => (
+          <div className={step.active ? "effectiveStep effectiveStepActive" : "effectiveStep"} key={step.label}>
+            <strong>{step.label}</strong>
+            <span>{step.model ?? "未设置"}</span>
+            <small>{step.reason}</small>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ProviderValidationView({
+  report,
+}: {
+  report: ProviderValidationReport | LocalRuntimeScanResult | ComfyScanResult;
+}) {
+  if ("connectionStatus" in report) {
+    return (
+      <section className="providerValidationReport" aria-label="Provider validation report">
+        <h4>连接测试结果</h4>
+        <DetailItem label="连接" value={report.connectionStatus} />
+        <DetailItem label="Auth" value={report.authStatus} />
+        <DetailItem label="模型列表" value={report.modelListStatus} />
+        <DetailItem label="生成测试" value={report.generationStatus} />
+        <DetailItem label="API Key 引用" value={report.apiKeyReferenceStatus} />
+        <ModelList models={report.models} />
+      </section>
+    );
+  }
+
+  if ("endpointReachable" in report) {
+    return (
+      <section className="providerValidationReport" aria-label="ComfyUI scan report">
+        <h4>ComfyUI 扫描结果</h4>
+        <DetailItem label="Endpoint" value={report.endpoint ?? "未设置"} />
+        <DetailItem label="Endpoint reachable" value={report.endpointReachable ? "是" : "否"} />
+        <DetailItem label="Chat LLM provider" value={report.isChatLlmProvider ? "是" : "否"} />
+        <ModelList models={report.capabilityFolders.flatMap((folder) => folder.models)} />
+      </section>
+    );
+  }
+
+  return (
+    <section className="providerValidationReport" aria-label="Local runtime scan report">
+      <h4>本地运行时扫描结果</h4>
+      <DetailItem label="Runtime" value={report.runtime} />
+      <DetailItem label="Endpoint" value={report.endpoint ?? "未设置"} />
+      <DetailItem label="Reachable" value={report.reachable ? "是" : "否"} />
+      <ModelList models={report.models.map((model) => model.name)} />
+    </section>
+  );
+}
+
+function ModelList({ models }: { models: string[] }) {
+  if (models.length === 0) {
+    return <span className="emptyInlineNote">未读取到模型列表。</span>;
+  }
+
+  return (
+    <div className="modelChipList">
+      {models.slice(0, 12).map((model) => (
+        <span key={model}>{model}</span>
+      ))}
+    </div>
   );
 }
 
@@ -2379,8 +3576,78 @@ function browserFixtureAgent(product: RuntimeProduct, item: string): ManagedAgen
     workspaceOrProfilePath: `/mock/home/${product === "openclaw" ? ".openclaw/agents" : ".hermes/profiles"}/${item}`,
     effectiveCwd: null,
     configFiles: [],
-    providerSummary: null,
-    modelSummary: null,
+    providerSummary: {
+      provider: product === "hermes" ? "lmstudio" : "OpenAI-compatible",
+      baseUrl: product === "hermes" ? null : "http://localhost:9999/v1",
+      secretFields: product === "hermes" ? [] : ["OPENAI_API_KEY"],
+      missingSecretFields: [],
+    },
+    modelSummary: {
+      defaultModel:
+        product === "hermes" ? "qwen3.5-9b-uncensored-hauhaucs-aggressive" : "xopglm51",
+      fallbackModel:
+        product === "hermes" ? "qwen3.6-27b-aeon-ultimate-uncensored-i1" : "xopkimi26",
+      configuredModels:
+        product === "hermes"
+          ? [
+              {
+                modelId: "qwen3.5-9b-uncensored-hauhaucs-aggressive",
+                name: "qwen3.5-9b-uncensored-hauhaucs-aggressive",
+                provider: "lmstudio",
+                baseUrl: null,
+                defaultModel: true,
+                fallbackModel: false,
+                source: "model.default",
+              },
+              {
+                modelId: "qwen3.6-27b-aeon-ultimate-uncensored-i1",
+                name: "qwen3.6-27b-aeon-ultimate-uncensored-i1",
+                provider: "lmstudio",
+                baseUrl: null,
+                defaultModel: false,
+                fallbackModel: true,
+                source: "fallback_providers",
+              },
+              {
+                modelId: "qwen3.5-9b-uncensored-hauhaucs-aggressive",
+                name: "qwen9b",
+                provider: "lmstudio",
+                baseUrl: null,
+                defaultModel: false,
+                fallbackModel: false,
+                source: "model_aliases",
+              },
+              {
+                modelId: "qwen3.6-27b-aeon-ultimate-uncensored-i1",
+                name: "qwen27b",
+                provider: "lmstudio",
+                baseUrl: null,
+                defaultModel: false,
+                fallbackModel: false,
+                source: "model_aliases",
+              },
+            ]
+          : [
+              {
+                modelId: "xopglm51",
+                name: "xopglm51",
+                provider: "OpenAI-compatible",
+                baseUrl: "http://localhost:9999/v1",
+                defaultModel: true,
+                fallbackModel: false,
+                source: "default_model",
+              },
+              {
+                modelId: "xopkimi26",
+                name: "xopkimi26",
+                provider: "OpenAI-compatible",
+                baseUrl: "http://localhost:9999/v1",
+                defaultModel: false,
+                fallbackModel: true,
+                source: "fallback_model",
+              },
+            ],
+    },
     permissionSummary: null,
     channelCount: 0,
     skillCount: 0,
@@ -2444,6 +3711,179 @@ function createTargetRoot(runtime: DashboardRuntime, name: string) {
 
   const base = runtime.homeDir.replace(/\/$/, "");
   return runtime.product === "openclaw" ? `${base}/agents/${name}` : `${base}/profiles/${name}`;
+}
+
+function inferProviderKind(value?: string | null): ProviderKind {
+  if (value === "ollama" || value === "lmstudio" || value === "comfyui" || value === "custom") {
+    return value;
+  }
+
+  return "openai-compatible";
+}
+
+function defaultProviderBaseUrl(kind: ProviderKind) {
+  if (kind === "ollama") {
+    return "http://localhost:11434";
+  }
+  if (kind === "lmstudio") {
+    return "http://localhost:1234";
+  }
+  if (kind === "comfyui") {
+    return "http://localhost:8188";
+  }
+
+  return "";
+}
+
+function buildModelProviderUpdateRequest(
+  agentId: string,
+  values: {
+    kind: ProviderKind;
+    providerName: string;
+    baseUrl: string;
+    apiKeyRef: string;
+    defaultModel: string;
+    fallbackModel: string;
+    contextLength: string;
+    maxTokens: string;
+    timeoutSeconds: string;
+    thinking: string;
+    reasoning: string;
+  },
+): ModelProviderUpdateRequest {
+  return {
+    agentId,
+    providerId: `agent:${agentId}`,
+    providerName: cleanFormValue(values.providerName) ?? values.kind,
+    kind: values.kind,
+    baseUrl: cleanFormValue(values.baseUrl),
+    apiKeyRef: cleanFormValue(values.apiKeyRef),
+    defaultModel: cleanFormValue(values.defaultModel),
+    fallbackModel: cleanFormValue(values.fallbackModel),
+    contextLength: cleanFormValue(values.contextLength),
+    maxTokens: cleanFormValue(values.maxTokens),
+    timeoutSeconds: cleanFormValue(values.timeoutSeconds),
+    thinking: cleanFormValue(values.thinking),
+    reasoning: cleanFormValue(values.reasoning),
+  };
+}
+
+function providerProfileInput(update: ModelProviderUpdateRequest) {
+  return {
+    id: update.providerId,
+    name: update.providerName ?? update.kind,
+    kind: update.kind,
+    baseUrl: update.baseUrl,
+    apiKeyRef: update.apiKeyRef,
+    defaultModel: update.defaultModel,
+    fallbackModel: update.fallbackModel,
+    validationJson: "{}",
+  };
+}
+
+function cleanFormValue(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function configuredModelsForAgent(
+  agent: ManagedAgent,
+  defaultModel: string,
+  fallbackModel: string,
+  providerList: AgentModelProvidersResponse | null,
+): ConfiguredModel[] {
+  if (providerList?.models.length) {
+    return providerList.models.map((model, index) => ({
+      id: model.modelId,
+      name: model.name || modelDisplayName(model.modelId, model.providerName ?? "Model"),
+      role: model.fallbackModel && !model.defaultModel ? "fallback" : "default",
+      providerName: model.providerName,
+      baseUrl: model.baseUrl,
+      apiKeyRef: model.apiKeyRef,
+      defaultModel: model.defaultModel,
+      fallbackModel: model.fallbackModel,
+      source: model.source || providerList.source || `runtime model list ${index + 1}`,
+      warnings: model.warnings ?? [],
+    }));
+  }
+
+  if (agent.modelSummary?.configuredModels?.length) {
+    return agent.modelSummary.configuredModels.map((model, index) => ({
+      id: model.modelId,
+      name: model.name || modelDisplayName(model.modelId, model.provider ?? "Model"),
+      role: model.fallbackModel && !model.defaultModel ? "fallback" : "default",
+      providerName: model.provider ?? agent.providerSummary?.provider ?? null,
+      baseUrl:
+        model.baseUrl ??
+        agent.providerSummary?.baseUrl ??
+        defaultBaseUrlForProvider(model.provider ?? agent.providerSummary?.provider),
+      apiKeyRef: agent.providerSummary?.secretFields[0] ?? null,
+      defaultModel: model.defaultModel,
+      fallbackModel: model.fallbackModel,
+      source: model.source || `scanned configured model ${index + 1}`,
+      warnings: [],
+    }));
+  }
+
+  const models: ConfiguredModel[] = [];
+  const cleanDefault = defaultModel.trim();
+  const cleanFallback = fallbackModel.trim();
+
+  if (cleanDefault) {
+    models.push({
+      id: cleanDefault,
+      name: modelDisplayName(cleanDefault, agent.providerSummary?.provider ?? "Default"),
+      role: "default",
+      providerName: agent.providerSummary?.provider ?? null,
+      baseUrl: agent.providerSummary?.baseUrl ?? defaultBaseUrlForProvider(agent.providerSummary?.provider),
+      apiKeyRef: agent.providerSummary?.secretFields[0] ?? null,
+      defaultModel: true,
+      fallbackModel: cleanFallback === cleanDefault,
+      source: "scanned agent config metadata",
+      warnings: [],
+    });
+  }
+  if (cleanFallback && cleanFallback !== cleanDefault) {
+    models.push({
+      id: cleanFallback,
+      name: modelDisplayName(cleanFallback, agent.providerSummary?.provider ?? "Fallback"),
+      role: "fallback",
+      providerName: agent.providerSummary?.provider ?? null,
+      baseUrl: agent.providerSummary?.baseUrl ?? defaultBaseUrlForProvider(agent.providerSummary?.provider),
+      apiKeyRef: agent.providerSummary?.secretFields[0] ?? null,
+      defaultModel: false,
+      fallbackModel: true,
+      source: "scanned agent config metadata",
+      warnings: [],
+    });
+  }
+
+  return models;
+}
+
+function modelDisplayName(modelId: string, providerName: string) {
+  const normalized = modelId
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) {
+    return providerName;
+  }
+  return normalized;
+}
+
+function defaultBaseUrlForProvider(provider?: string | null) {
+  const normalized = provider?.toLowerCase();
+  if (normalized === "lmstudio" || normalized === "lm-studio" || normalized === "lm studio") {
+    return "http://localhost:1234";
+  }
+  if (normalized === "ollama") {
+    return "http://localhost:11434";
+  }
+  if (normalized === "comfyui") {
+    return "http://localhost:8188";
+  }
+  return null;
 }
 
 function formatLastModified(value?: string | null) {

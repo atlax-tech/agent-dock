@@ -83,6 +83,20 @@ pub struct ProviderSummary {
 pub struct ModelSummary {
     pub default_model: Option<String>,
     pub fallback_model: Option<String>,
+    #[serde(default)]
+    pub configured_models: Vec<ConfiguredModelSummary>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfiguredModelSummary {
+    pub model_id: String,
+    pub name: String,
+    pub provider: Option<String>,
+    pub base_url: Option<String>,
+    pub default_model: bool,
+    pub fallback_model: bool,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

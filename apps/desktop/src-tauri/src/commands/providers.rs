@@ -2,6 +2,7 @@ use std::fs;
 use std::io::Write;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::blocking::Client;
@@ -11,8 +12,9 @@ use sha2::{Digest, Sha256};
 use similar::TextDiff;
 
 use crate::db::{
-    insert_backup_record, load_agent_records, load_provider_profiles, open_database,
-    upsert_agent_records, upsert_provider_profile, BackupRecord, ProviderKind, ProviderProfile,
+    delete_provider_profile, insert_backup_record, load_agent_records, load_provider_profiles,
+    open_database, update_provider_profile_sort_order, upsert_agent_records,
+    upsert_provider_profile, BackupRecord, ProviderKind, ProviderProfile,
 };
 use crate::scanner::ignore::is_private_runtime_dir;
 use crate::scanner::types::{AgentRuntime, AgentScanRecord, ModelSummary, ProviderSummary};
@@ -31,6 +33,64 @@ pub struct ProviderProfileInput {
     pub default_model: Option<String>,
     pub fallback_model: Option<String>,
     pub validation_json: Option<String>,
+    pub sort_index: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteProviderProfileRequest {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSortOrderRequest {
+    pub ordered_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderProfilesExport {
+    pub schema: String,
+    pub source: String,
+    pub exported_at: String,
+    pub providers: Vec<ProviderProfile>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportProviderProfilesRequest {
+    pub json: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentModelProvidersRequest {
+    pub agent_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProviderModel {
+    pub model_id: String,
+    pub name: String,
+    pub provider_name: Option<String>,
+    pub base_url: Option<String>,
+    pub api_key_ref: Option<String>,
+    pub default_model: bool,
+    pub fallback_model: bool,
+    pub source: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentModelProvidersResponse {
+    pub agent_id: String,
+    pub runtime: AgentRuntime,
+    pub source: String,
+    pub models: Vec<AgentProviderModel>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -44,6 +104,11 @@ pub struct ModelProviderUpdateRequest {
     pub api_key_ref: Option<String>,
     pub default_model: Option<String>,
     pub fallback_model: Option<String>,
+    pub context_length: Option<String>,
+    pub max_tokens: Option<String>,
+    pub timeout_seconds: Option<String>,
+    pub thinking: Option<String>,
+    pub reasoning: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -200,6 +265,258 @@ pub fn save_provider_profile(input: ProviderProfileInput) -> Result<ProviderProf
 }
 
 #[tauri::command]
+pub fn delete_provider_profile_command(
+    request: DeleteProviderProfileRequest,
+) -> Result<Vec<ProviderProfile>, String> {
+    let connection = open_database().map_err(|error| error.to_string())?;
+    delete_provider_profile(&connection, &request.id).map_err(|error| error.to_string())?;
+    load_provider_profiles(&connection).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn update_provider_profile_sort_order_command(
+    request: ProviderSortOrderRequest,
+) -> Result<Vec<ProviderProfile>, String> {
+    let mut connection = open_database().map_err(|error| error.to_string())?;
+    update_provider_profile_sort_order(&mut connection, &request.ordered_ids)
+        .map_err(|error| error.to_string())?;
+    load_provider_profiles(&connection).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn export_provider_profiles() -> Result<String, String> {
+    let connection = open_database().map_err(|error| error.to_string())?;
+    let export = ProviderProfilesExport {
+        schema: "agentdock.providerProfiles.v1".to_string(),
+        source: "cc-switch-inspired-provider-manager".to_string(),
+        exported_at: now_millis(),
+        providers: load_provider_profiles(&connection).map_err(|error| error.to_string())?,
+    };
+    serde_json::to_string_pretty(&export).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn import_provider_profiles(
+    request: ImportProviderProfilesRequest,
+) -> Result<Vec<ProviderProfile>, String> {
+    let parsed: ProviderProfilesExport =
+        serde_json::from_str(&request.json).map_err(|error| error.to_string())?;
+    if parsed.schema != "agentdock.providerProfiles.v1" {
+        return Err("Unsupported provider profile export schema.".to_string());
+    }
+    let connection = open_database().map_err(|error| error.to_string())?;
+    for profile in parsed.providers {
+        upsert_provider_profile(&connection, &profile).map_err(|error| error.to_string())?;
+    }
+    load_provider_profiles(&connection).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn list_agent_model_providers(
+    request: AgentModelProvidersRequest,
+) -> Result<AgentModelProvidersResponse, String> {
+    let connection = open_database().map_err(|error| error.to_string())?;
+    let agent = find_agent(&connection, &request.agent_id)?;
+    Ok(match agent.runtime {
+        AgentRuntime::OpenClaw => list_openclaw_agent_model_providers(&agent),
+        AgentRuntime::Hermes => list_hermes_agent_model_providers(&agent),
+    })
+}
+
+fn list_openclaw_agent_model_providers(agent: &AgentScanRecord) -> AgentModelProvidersResponse {
+    let mut warnings = Vec::new();
+    match Command::new("openclaw")
+        .args(["models", "list", "--agent", &agent.name, "--json"])
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            let text = String::from_utf8_lossy(&output.stdout);
+            match serde_json::from_str::<Value>(&text) {
+                Ok(value) => {
+                    let models = extract_provider_models_from_value(
+                        &value,
+                        agent,
+                        "openclaw models list --agent --json",
+                    );
+                    if !models.is_empty() {
+                        return AgentModelProvidersResponse {
+                            agent_id: agent.id.clone(),
+                            runtime: agent.runtime,
+                            source: "openclaw models list --agent --json".to_string(),
+                            models,
+                            warnings,
+                        };
+                    }
+                    warnings.push(
+                        "OpenClaw models list returned JSON but no model rows were recognized."
+                            .to_string(),
+                    );
+                }
+                Err(error) => warnings.push(format!(
+                    "OpenClaw models list JSON could not be parsed: {error}"
+                )),
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warnings.push(format!(
+                "OpenClaw models list failed with status {}: {}",
+                output.status,
+                stderr.trim()
+            ));
+        }
+        Err(error) => warnings.push(format!(
+            "OpenClaw CLI not available for model list scan: {error}"
+        )),
+    }
+    fallback_agent_model_providers(agent, "scanned agent config metadata", warnings)
+}
+
+fn list_hermes_agent_model_providers(agent: &AgentScanRecord) -> AgentModelProvidersResponse {
+    let mut warnings = Vec::new();
+    let client = match http_client() {
+        Ok(client) => client,
+        Err(error) => {
+            warnings.push(format!("HTTP client unavailable for Hermes dashboard scan: {error}"));
+            return fallback_agent_model_providers(agent, "scanned agent config metadata", warnings);
+        }
+    };
+    let mut models = Vec::new();
+    for (endpoint, source) in [
+        (
+            "http://127.0.0.1:9119/api/model/options",
+            "Hermes dashboard /api/model/options",
+        ),
+        (
+            "http://127.0.0.1:9119/api/model/auxiliary",
+            "Hermes dashboard /api/model/auxiliary",
+        ),
+    ] {
+        match client.get(endpoint).send() {
+            Ok(response) if response.status().is_success() => match response.json::<Value>() {
+                Ok(value) => models.extend(extract_provider_models_from_value(&value, agent, source)),
+                Err(error) => warnings.push(format!("{source} JSON could not be parsed: {error}")),
+            },
+            Ok(response) => warnings.push(format!("{source} failed: HTTP {}", response.status())),
+            Err(error) => warnings.push(format!("{source} not reachable: {error}")),
+        }
+    }
+    dedupe_provider_models(&mut models);
+    if models.is_empty() {
+        warnings.push(
+            "Hermes dashboard model endpoints were unavailable or returned no recognized model rows."
+                .to_string(),
+        );
+        return fallback_agent_model_providers(agent, "scanned agent config metadata", warnings);
+    }
+    AgentModelProvidersResponse {
+        agent_id: agent.id.clone(),
+        runtime: agent.runtime,
+        source: "Hermes dashboard model API".to_string(),
+        models,
+        warnings,
+    }
+}
+
+fn fallback_agent_model_providers(
+    agent: &AgentScanRecord,
+    source: &str,
+    mut warnings: Vec<String>,
+) -> AgentModelProvidersResponse {
+    warnings.push(
+        "Using scanned default/fallback model metadata because runtime model list command/API was unavailable."
+            .to_string(),
+    );
+    if !agent.model_summary.configured_models.is_empty() {
+        let models = agent
+            .model_summary
+            .configured_models
+            .iter()
+            .map(|model| AgentProviderModel {
+                model_id: model.model_id.clone(),
+                name: model.name.clone(),
+                provider_name: model.provider.clone(),
+                base_url: model
+                    .base_url
+                    .clone()
+                    .or_else(|| default_base_url_for_provider(model.provider.as_deref())),
+                api_key_ref: agent.provider_summary.secret_fields.first().cloned(),
+                default_model: model.default_model,
+                fallback_model: model.fallback_model,
+                source: model.source.clone(),
+                warnings: Vec::new(),
+            })
+            .collect();
+        return AgentModelProvidersResponse {
+            agent_id: agent.id.clone(),
+            runtime: agent.runtime,
+            source: source.to_string(),
+            models,
+            warnings,
+        };
+    }
+    let mut models = Vec::new();
+    if let Some(model) = agent
+        .model_summary
+        .default_model
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        models.push(AgentProviderModel {
+            model_id: model.to_string(),
+            name: model_display_name(model),
+            provider_name: agent.provider_summary.provider.clone(),
+            base_url: agent
+                .provider_summary
+                .base_url
+                .clone()
+                .or_else(|| default_base_url_for_provider(agent.provider_summary.provider.as_deref())),
+            api_key_ref: agent.provider_summary.secret_fields.first().cloned(),
+            default_model: true,
+            fallback_model: agent
+                .model_summary
+                .fallback_model
+                .as_deref()
+                .map(|fallback| fallback == model)
+                .unwrap_or(false),
+            source: source.to_string(),
+            warnings: Vec::new(),
+        });
+    }
+    if let Some(model) = agent
+        .model_summary
+        .fallback_model
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        if !models.iter().any(|row| row.model_id == model) {
+            models.push(AgentProviderModel {
+                model_id: model.to_string(),
+                name: model_display_name(model),
+                provider_name: agent.provider_summary.provider.clone(),
+                base_url: agent
+                    .provider_summary
+                    .base_url
+                    .clone()
+                    .or_else(|| default_base_url_for_provider(agent.provider_summary.provider.as_deref())),
+                api_key_ref: agent.provider_summary.secret_fields.first().cloned(),
+                default_model: false,
+                fallback_model: true,
+                source: source.to_string(),
+                warnings: Vec::new(),
+            });
+        }
+    }
+    AgentModelProvidersResponse {
+        agent_id: agent.id.clone(),
+        runtime: agent.runtime,
+        source: source.to_string(),
+        models,
+        warnings,
+    }
+}
+
+#[tauri::command]
 pub fn resolve_effective_model_preview(
     request: EffectiveModelRequest,
 ) -> Result<EffectiveModelPreview, String> {
@@ -215,6 +532,7 @@ pub fn resolve_effective_model_preview(
         .map(|input| ModelSummary {
             default_model: clean_optional(input.default_model.clone()),
             fallback_model: clean_optional(input.fallback_model.clone()),
+            configured_models: Vec::new(),
         })
         .unwrap_or(agent.model_summary);
     Ok(resolve_effective_model(
@@ -315,6 +633,7 @@ fn create_model_provider_update_plan_with_connection(
     let new_model_summary = ModelSummary {
         default_model: clean_optional(request.default_model.clone()),
         fallback_model: clean_optional(request.fallback_model.clone()),
+        configured_models: Vec::new(),
     };
     let provider_after = ProviderProfile {
         id: request
@@ -332,6 +651,7 @@ fn create_model_provider_update_plan_with_connection(
         fallback_model: clean_optional(request.fallback_model.clone()),
         validation_json: "{}".to_string(),
         updated_at: now_millis(),
+        sort_index: None,
     };
     let effective_before = resolve_effective_model(&agent.model_summary, None, &None);
     let effective_after = resolve_effective_model(&new_model_summary, Some(&provider_after), &None);
@@ -434,6 +754,7 @@ fn apply_model_provider_update_with_connection(
         fallback_model: clean_optional(request.update.fallback_model.clone()),
         validation_json: "{}".to_string(),
         updated_at: now_millis(),
+        sort_index: None,
     };
     upsert_provider_profile(connection, &profile).map_err(|error| error.to_string())?;
     let scan_result = crate::scanner::scan_selected_root(agent.runtime, agent.root_path.clone())
@@ -476,6 +797,7 @@ fn provider_profile_from_input(input: ProviderProfileInput) -> Result<ProviderPr
         fallback_model: clean_optional(input.fallback_model),
         validation_json: input.validation_json.unwrap_or_else(|| "{}".to_string()),
         updated_at: now_millis(),
+        sort_index: input.sort_index,
     })
 }
 
@@ -912,6 +1234,19 @@ fn apply_json_model_provider_fields(
         "fallback_model",
         clean_optional(request.fallback_model.clone()),
     );
+    set_json_optional(
+        object,
+        "context_length",
+        clean_optional(request.context_length.clone()),
+    );
+    set_json_optional(object, "max_tokens", clean_optional(request.max_tokens.clone()));
+    set_json_optional(
+        object,
+        "timeout_seconds",
+        clean_optional(request.timeout_seconds.clone()),
+    );
+    set_json_optional(object, "thinking", clean_optional(request.thinking.clone()));
+    set_json_optional(object, "reasoning", clean_optional(request.reasoning.clone()));
     object.remove("api_key");
     object.remove("apikey");
     Ok(())
@@ -941,6 +1276,19 @@ fn apply_toml_model_provider_fields(
         "fallback_model",
         clean_optional(request.fallback_model.clone()),
     );
+    set_toml_optional(
+        table,
+        "context_length",
+        clean_optional(request.context_length.clone()),
+    );
+    set_toml_optional(table, "max_tokens", clean_optional(request.max_tokens.clone()));
+    set_toml_optional(
+        table,
+        "timeout_seconds",
+        clean_optional(request.timeout_seconds.clone()),
+    );
+    set_toml_optional(table, "thinking", clean_optional(request.thinking.clone()));
+    set_toml_optional(table, "reasoning", clean_optional(request.reasoning.clone()));
     table.remove("api_key");
     table.remove("apikey");
     Ok(())
@@ -1119,6 +1467,11 @@ fn reject_secret_values_in_update(request: &ModelProviderUpdateRequest) -> Resul
         ("baseUrl", request.base_url.as_deref()),
         ("defaultModel", request.default_model.as_deref()),
         ("fallbackModel", request.fallback_model.as_deref()),
+        ("contextLength", request.context_length.as_deref()),
+        ("maxTokens", request.max_tokens.as_deref()),
+        ("timeoutSeconds", request.timeout_seconds.as_deref()),
+        ("thinking", request.thinking.as_deref()),
+        ("reasoning", request.reasoning.as_deref()),
     ] {
         if value.map(looks_like_secret_value).unwrap_or(false) {
             return Err(format!(
@@ -1350,6 +1703,169 @@ fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+fn extract_provider_models_from_value(
+    value: &Value,
+    agent: &AgentScanRecord,
+    source: &str,
+) -> Vec<AgentProviderModel> {
+    let mut rows = Vec::new();
+    collect_provider_model_rows(value, agent, source, &mut rows);
+    dedupe_provider_models(&mut rows);
+    rows
+}
+
+fn collect_provider_model_rows(
+    value: &Value,
+    agent: &AgentScanRecord,
+    source: &str,
+    rows: &mut Vec<AgentProviderModel>,
+) {
+    if let Some(array) = value.as_array() {
+        for item in array {
+            collect_provider_model_rows(item, agent, source, rows);
+        }
+        return;
+    }
+    let Some(object) = value.as_object() else {
+        return;
+    };
+
+    if let Some(model_id) = model_id_from_value(value) {
+        rows.push(AgentProviderModel {
+            model_id: model_id.clone(),
+            name: string_any(value, &["name", "displayName", "label", "title"])
+                .map(str::to_string)
+                .unwrap_or_else(|| model_display_name(&model_id)),
+            provider_name: string_any(
+                value,
+                &["provider", "providerName", "provider_name", "apiProvider"],
+            )
+            .map(str::to_string)
+            .or_else(|| agent.provider_summary.provider.clone()),
+            base_url: string_any(value, &["base_url", "baseURL", "baseUrl", "endpoint", "url"])
+                .map(str::to_string)
+                .or_else(|| agent.provider_summary.base_url.clone()),
+            api_key_ref: string_any(value, &["apiKeyRef", "api_key_ref", "apiKey", "api_key"])
+                .map(str::to_string)
+                .or_else(|| agent.provider_summary.secret_fields.first().cloned()),
+            default_model: bool_any(value, &["default", "defaultModel", "isDefault"])
+                .unwrap_or_else(|| {
+                    agent
+                        .model_summary
+                        .default_model
+                        .as_deref()
+                        .map(|default| default == model_id)
+                        .unwrap_or(false)
+                }),
+            fallback_model: bool_any(value, &["fallback", "fallbackModel", "isFallback"])
+                .unwrap_or_else(|| {
+                    agent
+                        .model_summary
+                        .fallback_model
+                        .as_deref()
+                        .map(|fallback| fallback == model_id)
+                        .unwrap_or(false)
+                }),
+            source: source.to_string(),
+            warnings: Vec::new(),
+        });
+    }
+
+    for key in [
+        "data",
+        "models",
+        "providers",
+        "providerModels",
+        "options",
+        "available",
+        "auxiliary",
+        "items",
+    ] {
+        if let Some(child) = object.get(key) {
+            collect_provider_model_rows(child, agent, source, rows);
+        }
+    }
+}
+
+fn model_id_from_value(value: &Value) -> Option<String> {
+    string_any(
+        value,
+        &[
+            "modelId",
+            "model_id",
+            "model",
+            "id",
+            "name",
+            "value",
+            "modelName",
+            "model_name",
+        ],
+    )
+    .map(str::to_string)
+}
+
+fn string_any<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    for key in keys {
+        if let Some(text) = value.get(*key).and_then(Value::as_str) {
+            return Some(text);
+        }
+    }
+    None
+}
+
+fn bool_any(value: &Value, keys: &[&str]) -> Option<bool> {
+    for key in keys {
+        if let Some(flag) = value.get(*key).and_then(Value::as_bool) {
+            return Some(flag);
+        }
+    }
+    None
+}
+
+fn dedupe_provider_models(rows: &mut Vec<AgentProviderModel>) {
+    let mut deduped = Vec::new();
+    for row in rows.drain(..) {
+        if let Some(existing) = deduped
+            .iter_mut()
+            .find(|existing: &&mut AgentProviderModel| {
+                existing.model_id == row.model_id && existing.provider_name == row.provider_name
+            })
+        {
+            existing.default_model |= row.default_model;
+            existing.fallback_model |= row.fallback_model;
+            if existing.base_url.is_none() {
+                existing.base_url = row.base_url;
+            }
+            if existing.api_key_ref.is_none() {
+                existing.api_key_ref = row.api_key_ref;
+            }
+            existing.warnings.extend(row.warnings);
+        } else {
+            deduped.push(row);
+        }
+    }
+    *rows = deduped;
+}
+
+fn model_display_name(model_id: &str) -> String {
+    model_id
+        .replace(['_', '-'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn default_base_url_for_provider(provider: Option<&str>) -> Option<String> {
+    match provider.map(|value| value.to_ascii_lowercase()) {
+        Some(value) if value == "lmstudio" || value == "lm-studio" || value == "lm studio" => {
+            Some("http://localhost:1234".to_string())
+        }
+        Some(value) if value == "ollama" => Some("http://localhost:11434".to_string()),
+        Some(value) if value == "comfyui" => Some("http://localhost:8188".to_string()),
+        _ => None,
+    }
+}
+
 fn clean_optional(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
@@ -1411,6 +1927,7 @@ mod tests {
             name: "Provider Test Agent".to_string(),
             root_path: root.to_path_buf(),
             config_paths: vec![root.join("config.json")],
+            config_files: Vec::new(),
             personality_files: Vec::new(),
             skill_paths: Vec::new(),
             provider_summary: ProviderSummary::default(),
@@ -1432,6 +1949,11 @@ mod tests {
             api_key_ref: Some("AGENTDOCK_TEST_KEY".to_string()),
             default_model: Some("gpt-test".to_string()),
             fallback_model: Some("gpt-fallback".to_string()),
+            context_length: Some("128000".to_string()),
+            max_tokens: Some("8192".to_string()),
+            timeout_seconds: Some("120".to_string()),
+            thinking: Some("auto".to_string()),
+            reasoning: Some("medium".to_string()),
         }
     }
 
@@ -1441,6 +1963,7 @@ mod tests {
             &ModelSummary {
                 default_model: Some("agent-default".to_string()),
                 fallback_model: Some("agent-fallback".to_string()),
+                configured_models: Vec::new(),
             },
             None,
             &None,
@@ -1448,6 +1971,39 @@ mod tests {
 
         assert_eq!(preview.effective_model.as_deref(), Some("agent-default"));
         assert_eq!(preview.source, "Agent default model");
+    }
+
+    #[test]
+    fn provider_model_list_extractor_keeps_provider_and_base_url() {
+        let root = tempdir().expect("temp");
+        let agent = test_agent(root.path());
+        let value = json!({
+            "data": [
+                {
+                    "modelId": "xopglm51",
+                    "name": "xopglm51",
+                    "providerName": "OpenAI-compatible",
+                    "baseURL": "http://localhost:9999/v1",
+                    "defaultModel": true
+                },
+                {
+                    "modelId": "xopglm-fallback",
+                    "providerName": "OpenAI-compatible",
+                    "endpoint": "http://localhost:9999/v1",
+                    "fallbackModel": true
+                }
+            ]
+        });
+
+        let rows = extract_provider_models_from_value(&value, &agent, "fixture");
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].model_id, "xopglm51");
+        assert_eq!(rows[0].provider_name.as_deref(), Some("OpenAI-compatible"));
+        assert_eq!(rows[0].base_url.as_deref(), Some("http://localhost:9999/v1"));
+        assert!(rows[0].default_model);
+        assert!(rows[1].fallback_model);
+        assert_eq!(rows[1].base_url.as_deref(), Some("http://localhost:9999/v1"));
     }
 
     #[test]
@@ -1624,6 +2180,7 @@ mod tests {
             name: "Runtime Root".to_string(),
             root_path: openclaw_root.clone(),
             config_paths: vec![openclaw_root.join("config.json")],
+            config_files: Vec::new(),
             personality_files: Vec::new(),
             skill_paths: Vec::new(),
             provider_summary: ProviderSummary::default(),
@@ -1658,6 +2215,7 @@ mod tests {
                 root.join("config.json"),
                 skill_dir.join("config.json"),
             ],
+            config_files: Vec::new(),
             personality_files: Vec::new(),
             skill_paths: Vec::new(),
             provider_summary: ProviderSummary::default(),
@@ -1685,6 +2243,7 @@ mod tests {
             name: "Ambiguous Agent".to_string(),
             root_path: root.clone(),
             config_paths: vec![root.join("config.json"), root.join("config.yaml")],
+            config_files: Vec::new(),
             personality_files: Vec::new(),
             skill_paths: Vec::new(),
             provider_summary: ProviderSummary::default(),
@@ -1713,6 +2272,7 @@ mod tests {
             name: "Valid Agent".to_string(),
             root_path: root.clone(),
             config_paths: vec![root.join("config.json")],
+            config_files: Vec::new(),
             personality_files: Vec::new(),
             skill_paths: Vec::new(),
             provider_summary: ProviderSummary::default(),

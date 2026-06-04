@@ -1,5 +1,222 @@
 # AgentDock Development Log
 
+## 2026-06-04 - Hermes Configured Models Scan
+
+### Task Goal
+
+Fix the configured model list so Hermes profiles show all configured model
+entries from `config.yaml`, matching the manual inspection script output:
+`model.default`, `fallback_providers`, and `model_aliases`.
+
+### Files Changed
+
+- `.agent-harness/codex/plans/2026-06-04-hermes-configured-models-scan.md`
+- `apps/desktop/src-tauri/src/scanner/types.rs`
+- `apps/desktop/src-tauri/src/scanner/hermes.rs`
+- `apps/desktop/src-tauri/src/scanner/openclaw.rs`
+- `apps/desktop/src-tauri/src/commands/agent_profiles.rs`
+- `apps/desktop/src-tauri/src/commands/providers.rs`
+- `apps/desktop/src/app/App.tsx`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Extended `ModelSummary` with `configuredModels`.
+- Hermes scanner now collects:
+  - `model.provider` + `model.default`
+  - `fallback_providers[].provider/model`
+  - `model_aliases.*.provider/model`
+- OpenClaw scanner now also populates configured model rows for existing
+  default/fallback fields.
+- Provider model-list fallback now prefers scanned `configuredModels`.
+- Added default local endpoints for known local providers when config omits
+  Base URL, including LM Studio `http://localhost:1234`.
+- Frontend configured model list now uses `modelSummary.configuredModels` before
+  falling back to default/fallback fields.
+- Browser fixture now includes Hermes-style default, fallback, and alias model
+  entries so UI QA covers this case.
+- Suppressed backend model-list index errors when scanned configured models are
+  already available for display.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed, 73
+  tests.
+- `git diff --check`: passed.
+- Browser QA on Hermes fixture confirmed default model, fallback model,
+  `qwen9b`, `qwen27b`, and LM Studio endpoint display without console errors.
+
+### Result
+
+Hermes configured model lists now reflect the profile config structure instead
+of showing only `model.default`.
+
+### Risks
+
+- `custom_providers` parsing is not expanded yet because the provided real
+  profile has `custom_providers: null`.
+
+### Next Step
+
+Verify against the real `companion-agent` profile after a rescan to confirm
+the list shows default, fallback, and aliases from the live config.
+
+## 2026-06-04 - Provider Model List Command Scan
+
+### Task Goal
+
+Address Provider / Model screenshot feedback: remove duplicated add-new-model
+UI, show configured model/provider rows from runtime-specific read-only sources,
+prevent provider switching inside configured-model detail, and improve Base URL
+scan coverage.
+
+### Files Changed
+
+- `.agent-harness/codex/plans/2026-06-04-provider-model-list-command-scan.md`
+- `apps/desktop/src-tauri/src/commands/agent_profiles.rs`
+- `apps/desktop/src-tauri/src/commands/providers.rs`
+- `apps/desktop/src-tauri/src/lib.rs`
+- `apps/desktop/src-tauri/src/scanner/hermes.rs`
+- `apps/desktop/src-tauri/src/scanner/openclaw.rs`
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Removed the duplicated `添加新模型区域`; only the title-row
+  `+ 添加新模型` action remains.
+- Added read-only backend command `list_agent_model_providers`.
+- OpenClaw model list attempts the official read-only command
+  `openclaw models list --agent <agentName> --json`, then falls back to scanned
+  agent config metadata with warnings.
+- Hermes model list attempts the official dashboard model endpoints
+  `/api/model/options` and `/api/model/auxiliary`, then falls back to scanned
+  profile config metadata with warnings.
+- Configured model rows now support model ID, name, provider name,
+  Base URL / Endpoint, default flag, fallback flag, source, and warnings.
+- Configured-model detail no longer renders provider preset cards and keeps
+  Provider Name, Base URL / Endpoint, and API key reference read-only.
+- Add-new-model dialog still allows provider preset selection.
+- Expanded Base URL scan coverage for OpenClaw and Hermes configs:
+  `base_url`, `baseURL`, `baseUrl`, `endpoint`, and nested
+  `provider.*` / `model.*` variants.
+- Updated browser fixture model metadata so local Browser QA can exercise
+  configured model detail and fallback rows.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed, 72
+  tests.
+- `git diff --check`: passed.
+- Browser QA on `http://127.0.0.1:1420/?agentdockRuntimeFixture=installed`:
+  page identity passed, nonblank app, no framework overlay, no console
+  warnings/errors, no horizontal overflow at 1280px or 390px, duplicate
+  add-model area absent, title-row add action present, configured model rows
+  show default/fallback plus Base URL, configured detail has no provider preset
+  switching, add-new-model dialog still shows provider presets.
+
+### Result
+
+Provider / Model now keeps add behavior in one place, model detail is scoped to
+the selected configured model, and Base URL display has both command/API and
+broader config-scan sources.
+
+### Risks
+
+- The local machine has Hermes CLI but no OpenClaw CLI, so OpenClaw command
+  execution was implemented and covered through fallback/parser tests rather
+  than a live OpenClaw CLI run.
+- Hermes dashboard model endpoints require the Hermes dashboard service to be
+  running; otherwise the UI intentionally falls back to scanned config metadata.
+
+### Next Step
+
+Run against a real OpenClaw install with `openclaw models list --agent ... --json`
+available and a real Hermes dashboard session to verify the exact returned JSON
+shapes.
+
+## 2026-06-04 - Provider / Model Decoupled View
+
+### Task Goal
+
+Fix the Provider / Model pane so configured models, adding a new model, and
+Provider Profiles are clearly separated. Make configured model details editable
+through a dialog while preserving AgentDock's preview-before-write provider
+mutation lifecycle.
+
+### Files Changed
+
+- `.agent-harness/codex/plans/2026-06-04-provider-model-decoupled-view.md`
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `apps/desktop/src-tauri/src/commands/providers.rs`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Split the Provider / Model main view into three visible areas:
+  configured model list, add-new-model area, and Provider Profile area.
+- Moved `+ 添加新模型` to the selected agent/profile title row and wired it to
+  a reusable model configuration dialog.
+- Added configured model rows that show model ID, display name, Default model
+  true/false, and Fallback model true/false.
+- Added a shared add/detail dialog with model ID, model name, provider name,
+  Base URL / Endpoint, API key reference with eye toggle, default/fallback
+  flags, and model parameter fields.
+- Kept API key handling secret-safe: the UI displays scanned/reference text
+  only, masks it by default, and does not read or store raw key values.
+- Added model parameter fields to the backend provider update request so
+  `contextLength`, `maxTokens`, `timeoutSeconds`, `thinking`, and `reasoning`
+  participate in provider/model update plan diffs.
+- Clarified Provider Profile as reusable endpoint/model metadata, not the
+  current agent/profile's active runtime config.
+- Added responsive layout rules for desktop, medium-width, and mobile Provider
+  views.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed, 71
+  tests.
+- `git diff --check`: passed.
+- `rg -n "apiKey|secret|token" apps/desktop/src/app/App.tsx`: reviewed; hits
+  are API key reference state/labels and explicit secret-safety copy.
+- Browser QA on `http://127.0.0.1:1420/?agentdockRuntimeFixture=installed`:
+  page identity passed, app nonblank, no framework overlay, no console
+  warnings/errors, desktop 1280px layout had no horizontal overflow, mobile
+  390px layout had no horizontal overflow, add-model dialog opened, and API key
+  eye toggle changed state.
+
+### Result
+
+Provider / Model is now visually and behaviorally decoupled into the requested
+three areas. Writes still require the existing provider/model update plan and
+confirm apply flow; no raw secret value storage was introduced.
+
+### Risks
+
+- Browser fixture data has no preconfigured models, so configured-model detail
+  click was validated structurally through the same dialog code path but not
+  with a real scanned model row.
+- OpenClaw/Hermes official config schemas differ; this slice extends the
+  existing AgentDock provider update contract rather than replacing it with
+  runtime-specific CLI command execution.
+
+### Next Step
+
+Run the desktop app against real OpenClaw/Hermes configs with configured default
+and fallback models, then decide whether provider writes should be split into
+runtime-specific OpenClaw CLI and Hermes config plan generators.
+
 ## 2026-06-04 - Version Popover Simple Lines
 
 ### Task Goal
@@ -233,6 +450,170 @@ real operations against `~/.openclaw` / `~/.hermes`.
 ### Next Step
 
 Proceed to Phase 3 only when explicitly requested.
+
+## 2026-06-04 - Phase 3 Provider / Model Manager Slice
+
+### Task Goal
+
+Start Phase 3 by turning the Dashboard Provider operation node into a real
+agent/profile scoped Provider / Model Manager using existing backend provider
+commands.
+
+### Files Changed
+
+- `.agent-harness/codex/plans/017-phase3-provider-model-manager.md`
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `apps/desktop/src-tauri/src/commands/mod.rs`
+- `apps/desktop/src-tauri/src/commands/providers.rs`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added a task-specific Phase 3 plan under the local harness plan directory.
+- Replaced the Provider placeholder pane with a real Provider / Model Manager.
+- Added provider presets for OpenAI-compatible, Ollama, LM Studio, ComfyUI, and
+  Custom.
+- Added agent/profile scoped form fields for provider name, base URL, API key
+  reference, default model, and fallback model.
+- Added effective model resolution preview via `resolve_effective_model_preview`.
+- Added connection/model tests using existing commands:
+  `validate_openai_provider`, `scan_ollama_runtime`, `scan_lmstudio_runtime`,
+  and `scan_comfy_runtime`.
+- Added provider/model update plan preview via `create_model_provider_update_plan`.
+- Added explicit confirm apply via `apply_model_provider_update`, using the
+  preview old hash as `expectedHash`.
+- Apply success triggers managed-agent rescan and runtime detection refresh.
+- Added Provider pane styles for presets, form, effective model resolution,
+  connection report, model chips, diff preview, and apply state.
+- Fixed Tauri command module exports for existing `agent_profiles` and
+  `runtime_detection` modules.
+- Updated provider command tests to include the current `config_files` field in
+  local test `AgentScanRecord` fixtures.
+
+### Boundary Confirmation
+
+- No Provider import/export, delete, drag sorting, or standalone provider
+  settings page was added.
+- No secret value field was added; the UI only accepts an API key reference name.
+- No session or memory full content is read.
+- No Provider operation bypasses preview before write.
+- No Phase 4+ Personality, Memory, Sessions, Skills implementation was added.
+- No Phase 5+ Permissions, Phase 6+ Channels, or Scheduled Tasks implementation
+  was added.
+- PRD, SPEC, and UI/UX product docs were not modified.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `npm run build`: passed.
+- `git diff --check`: passed.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed
+  (71 tests).
+- Final grep/stat/status are captured in the final report.
+
+### Result
+
+Phase 3 Provider / Model Manager first vertical slice is implemented and
+validated.
+
+### Risks
+
+- OpenAI-compatible connection testing uses the provided base URL and can perform
+  a lightweight generation request only when a model is set; auth/model failures
+  are surfaced but secret values are not read.
+- Local runtime tests depend on Ollama, LM Studio, or ComfyUI being reachable on
+  the selected local endpoint.
+
+### Next Step
+
+Continue Phase 3 with provider profile list management, import/export, delete,
+and ordering only when explicitly requested.
+
+## 2026-06-04 - Phase 3 Provider Full Closeout from cc-switch
+
+### Task Goal
+
+Complete Phase 3 Provider / Model Manager by aligning with the MIT-licensed
+`farion1231/cc-switch` provider management model: provider profiles, CRUD,
+ordering, import/export, presets, model resolution, and connection checks.
+
+### Source Reference
+
+- Reviewed `farion1231/cc-switch` at GitHub.
+- License: MIT, copyright Jason Young.
+- AgentDock adapted the product behavior and data model shape rather than
+  importing cc-switch's full app architecture or dependencies.
+
+### Files Changed
+
+- `apps/desktop/src-tauri/src/db/mod.rs`
+- `apps/desktop/src-tauri/src/commands/providers.rs`
+- `apps/desktop/src-tauri/src/lib.rs`
+- `apps/desktop/src/app/App.tsx`
+- `apps/desktop/src/app/styles.css`
+- `docs/engineering/dev_log.md`
+
+### Implemented
+
+- Added `sortIndex` semantics to AgentDock provider profiles, matching the
+  cc-switch ordering model.
+- Added provider profile delete command.
+- Added provider profile sort-order update command.
+- Added provider profile JSON export command.
+- Added provider profile JSON import command with schema validation.
+- Added Provider Profiles list in the Provider / Model pane.
+- Added save-current-form-as-provider-profile.
+- Added select saved profile to refill the active Provider / Model form.
+- Added delete saved profile.
+- Added up/down ordering controls as a dependency-light replacement for
+  cc-switch drag sort, preserving the same ordered-provider behavior.
+- Added export JSON to textarea and import JSON from textarea.
+- Kept provider/model write flow as AgentDock-specific plan preview and explicit
+  confirm apply.
+
+### Boundary Confirmation
+
+- No secret value storage was added; `apiKeyRef` still rejects secret-like
+  values.
+- Import accepts only AgentDock provider profile export JSON, not arbitrary
+  cc-switch SQL/database backups.
+- Provider profile delete removes AgentDock profile metadata only; it does not
+  mutate agent/profile runtime config.
+- Runtime provider/model writes still require plan preview and backup-backed
+  apply.
+- No Phase 4+ Personality, Memory, Sessions, Skills behavior was added.
+- No Phase 5+ Permissions, Phase 6+ Channels, or Scheduled Tasks behavior was
+  added.
+- PRD, SPEC, and UI/UX product docs were not modified.
+
+### Validation Performed
+
+- `npm run check`: passed.
+- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed.
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: passed
+  (71 tests).
+- Full final validation is captured in the final report.
+
+### Result
+
+Phase 3 Provider / Model Manager is complete for provider presets,
+OpenAI-compatible/Ollama/LM Studio/ComfyUI/custom handling, effective model
+resolution, connection testing, profile CRUD, ordering, import/export, and
+preview-gated apply.
+
+### Risks
+
+- Up/down ordering intentionally replaces drag-and-drop to avoid introducing new
+  frontend dependencies in this slice.
+- Import/export is AgentDock JSON, not a direct cc-switch database import. This
+  keeps the local-first safety boundary and avoids silently rewriting runtime
+  config.
+
+### Next Step
+
+Proceed to Phase 4 only when explicitly requested.
 
 ## 2026-06-04 - Phase 1 + Phase 2 Audit and Closeout
 
